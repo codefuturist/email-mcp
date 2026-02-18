@@ -42,11 +42,15 @@ Key design decisions:
 Requires Node.js ≥ 20.
 
 ```bash
-# Run directly with npx (no install needed)
+# Run directly (no install needed)
 npx @codefuturist/email-mcp setup
+# or
+pnpm dlx @codefuturist/email-mcp setup
 
 # Or install globally
 npm install -g @codefuturist/email-mcp
+# or
+pnpm add -g @codefuturist/email-mcp
 ```
 
 ## Usage
@@ -72,12 +76,27 @@ email-mcp test personal   # specific account
 
 ### Configure Your MCP Client
 
+Using npx:
+
 ```json
 {
   "mcpServers": {
     "email": {
       "command": "npx",
       "args": ["@codefuturist/email-mcp", "stdio"]
+    }
+  }
+}
+```
+
+Or using pnpm:
+
+```json
+{
+  "mcpServers": {
+    "email": {
+      "command": "pnpm",
+      "args": ["dlx", "@codefuturist/email-mcp", "stdio"]
     }
   }
 }
