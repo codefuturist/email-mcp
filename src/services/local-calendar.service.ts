@@ -99,8 +99,35 @@ interface JXAScriptOptions {
   confirm: boolean;
 }
 
-function escapeAS(s: string): string {
+/** @internal Exported for testing. */
+export function escapeAS(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * Emit AppleScript lines that set an existing date variable to a specific
+ * point in time by assigning each component (year, month, day, hours, minutes,
+ * seconds) individually.
+ *
+ * Uses the JS Date's **local-time** getters so the resulting AppleScript date
+ * matches the system timezone — the same timezone Calendar.app operates in.
+ *
+ * This replaces the previous approach of converting to Unix epoch via
+ * `date -j … '+%s'` and coercing `(number) as date`, which fails on macOS
+ * because AppleScript cannot coerce large integers to dates (error -1700).
+ *
+ * @internal Exported for testing.
+ */
+export function dateToAppleScriptLines(varName: string, d: Date): string[] {
+  return [
+    `set ${varName} to current date`,
+    `set year of ${varName} to ${d.getFullYear()}`,
+    `set month of ${varName} to ${d.getMonth() + 1}`,
+    `set day of ${varName} to ${d.getDate()}`,
+    `set hours of ${varName} to ${d.getHours()}`,
+    `set minutes of ${varName} to ${d.getMinutes()}`,
+    `set seconds of ${varName} to ${d.getSeconds()}`,
+  ];
 }
 
 function buildAppleScript(opts: JXAScriptOptions): string {
@@ -116,18 +143,12 @@ function buildAppleScript(opts: JXAScriptOptions): string {
   const passcode = escapeAS(event.passcode ?? '');
   const calName = escapeAS(calendarName);
 
-  const startISO = event.start.toISOString().replace(/\.\d+Z$/, '');
-  const endISO = event.end.toISOString().replace(/\.\d+Z$/, '');
-
   const lines: string[] = [
     `set eventTitle to "${title}"`,
-    'set eventStart to current date',
-    'set eventEnd to current date',
     '',
-    `set eventStart to do shell script "date -j -f '%Y-%m-%dT%H:%M:%S' '${startISO}' '+%s'"`,
-    'set eventStart to (eventStart as number) as date',
-    `set eventEnd to do shell script "date -j -f '%Y-%m-%dT%H:%M:%S' '${endISO}' '+%s'"`,
-    'set eventEnd to (eventEnd as number) as date',
+    ...dateToAppleScriptLines('eventStart', event.start),
+    '',
+    ...dateToAppleScriptLines('eventEnd', event.end),
     '',
   ];
 
