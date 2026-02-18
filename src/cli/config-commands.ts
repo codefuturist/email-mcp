@@ -8,15 +8,23 @@
 
 import fs from 'node:fs/promises';
 
-import { cancel, confirm, intro, isCancel, log, outro } from '@clack/prompts';
+import { cancel, confirm, intro, isCancel, log, outro, text } from '@clack/prompts';
 
-import { CONFIG_FILE, configExists, generateTemplate, loadConfig } from '../config/loader.js';
+import {
+  CONFIG_FILE,
+  configExists,
+  generateTemplate,
+  loadConfig,
+  loadRawConfig,
+  saveConfig,
+} from '../config/loader.js';
 
 function printConfigUsage(): void {
   console.log(`Usage: email-mcp config <subcommand>
 
 Subcommands:
   show    Show current configuration (passwords masked)
+  edit    Edit global settings interactively
   path    Print config file path
   init    Create a template config file
 `);
@@ -43,7 +51,8 @@ async function showConfig(): Promise<void> {
 
   console.log(`Config file: ${CONFIG_FILE}\n`);
   console.log(`[settings]`);
-  console.log(`  rate_limit = ${config.settings.rateLimit}\n`);
+  console.log(`  rate_limit = ${config.settings.rateLimit}`);
+  console.log(`  read_only  = ${config.settings.readOnly}\n`);
 
   config.accounts.forEach((account) => {
     console.log(`[accounts.${account.name}]`);
@@ -85,10 +94,68 @@ async function initConfig(): Promise<void> {
   outro('Done!');
 }
 
+async function editSettings(): Promise<void> {
+  intro('email-mcp › Edit Settings');
+
+  const exists = await configExists();
+  if (!exists) {
+    log.error(`No config file found at: ${CONFIG_FILE}`);
+    cancel("Run 'email-mcp account add' or 'email-mcp config init' first.");
+    return;
+  }
+
+  const config = await loadRawConfig();
+  const { settings } = config;
+
+  log.info(`Current settings:`);
+  log.info(`  rate_limit = ${settings.rate_limit}`);
+  log.info(`  read_only  = ${settings.read_only}`);
+
+  const rateLimitStr = await text({
+    message: 'Rate limit (max emails per minute per account)',
+    defaultValue: String(settings.rate_limit),
+    initialValue: String(settings.rate_limit),
+    validate: (v) => {
+      if (!v) return 'Must be a positive integer';
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n) || n < 1) return 'Must be a positive integer';
+      return undefined;
+    },
+  });
+  if (isCancel(rateLimitStr)) {
+    cancel('Cancelled.');
+    return;
+  }
+
+  const readOnly = await confirm({
+    message: 'Read-only mode? (disables all write operations)',
+    initialValue: settings.read_only,
+  });
+  if (isCancel(readOnly)) {
+    cancel('Cancelled.');
+    return;
+  }
+
+  const updatedConfig = {
+    ...config,
+    settings: {
+      rate_limit: parseInt(rateLimitStr, 10),
+      read_only: readOnly,
+    },
+  };
+
+  await saveConfig(updatedConfig);
+  log.success(`Settings updated. Config saved to ${CONFIG_FILE}`);
+  outro('Done!');
+}
+
 export default async function runConfigCommand(subcommand?: string): Promise<void> {
   switch (subcommand) {
     case 'show':
       await showConfig();
+      return;
+    case 'edit':
+      await editSettings();
       return;
     case 'path':
       showPath();

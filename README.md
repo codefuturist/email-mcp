@@ -58,7 +58,10 @@ pnpm add -g @codefuturist/email-mcp
 ### Setup
 
 ```bash
-# Interactive setup (recommended)
+# Add an email account interactively (recommended)
+email-mcp account add
+
+# Or use the legacy alias
 email-mcp setup
 
 # Or create a template config manually
@@ -127,16 +130,23 @@ For single-account setups without a config file, use environment variables:
 email-mcp [command]
 
 Commands:
-  stdio                Run as MCP server over stdio (default)
-  setup                Interactive account setup wizard
-  test                 Test connections for all or a specific account
-  config show|path|init  Config management
-  scheduler check      Process pending scheduled emails
-  scheduler list       Show all scheduled emails
-  scheduler install    Install OS-level scheduler (launchd/crontab)
-  scheduler uninstall  Remove OS-level scheduler
-  scheduler status     Show scheduler installation status
-  help                 Show help
+  stdio                     Run as MCP server over stdio (default)
+  account list              List all configured accounts
+  account add               Add a new email account interactively
+  account edit [name]       Edit an existing account
+  account delete [name]     Remove an account
+  setup                     Alias for 'account add'
+  test                      Test connections for all or a specific account
+  config show               Show config (passwords masked)
+  config edit               Edit global settings (rate limit, read-only)
+  config path               Print config file path
+  config init               Create template config
+  scheduler check           Process pending scheduled emails
+  scheduler list            Show all scheduled emails
+  scheduler install         Install OS-level scheduler (launchd/crontab)
+  scheduler uninstall       Remove OS-level scheduler
+  scheduler status          Show scheduler installation status
+  help                      Show help
 ```
 
 ### Configuration
@@ -324,9 +334,10 @@ src/
 ├── server.ts              — MCP server factory
 ├── logging.ts             — MCP protocol logging bridge
 ├── cli/                   — Interactive CLI commands
-│   ├── setup.ts           — Account setup wizard
+│   ├── account-commands.ts — Account CRUD (list, add, edit, delete)
+│   ├── setup.ts           — Legacy setup alias → account add
 │   ├── test.ts            — Connection tester
-│   ├── config-commands.ts — Config management
+│   ├── config-commands.ts — Config management (show, edit, path, init)
 │   ├── providers.ts       — Provider auto-detection + OAuth2 endpoints
 │   └── scheduler.ts       — Scheduler CLI
 ├── config/                — Configuration layer

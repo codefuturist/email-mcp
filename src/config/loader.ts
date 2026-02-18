@@ -144,6 +144,20 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
 // ---------------------------------------------------------------------------
 
 /**
+ * Load raw (snake_case) config from TOML file without normalization.
+ * Useful for read-modify-write operations in CLI commands.
+ * Throws if no config file exists or validation fails.
+ */
+export async function loadRawConfig(configPath?: string): Promise<RawAppConfig> {
+  const filePath = configPath ?? CONFIG_FILE;
+  const fileConfig = await loadFromFile(filePath);
+  if (!fileConfig) {
+    throw new Error(`No config file found at: ${filePath}`);
+  }
+  return AppConfigFileSchema.parse(fileConfig);
+}
+
+/**
  * Load and validate configuration from env vars or TOML file.
  * Throws on validation errors.
  */

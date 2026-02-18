@@ -35,22 +35,28 @@ Usage:
 
 Commands:
   stdio       Run as MCP server over stdio (default)
-  setup       Interactive account setup wizard
+  account     Account management (list, add, edit, delete)
+  setup       Alias for 'account add'
   test        Test connections for all or a specific account
-  config      Config management (show, path, init)
+  config      Config management (show, edit, path, init)
   scheduler   Email scheduling management (check, list, install, uninstall, status)
   help        Show this help message
 
 Examples:
   email-mcp                         # Start MCP server
-  email-mcp setup                   # Configure email accounts
-  email-mcp test                    # Test all accounts
-  email-mcp test personal           # Test specific account
-  email-mcp config show             # Show config (passwords masked)
-  email-mcp config path             # Print config file path
-  email-mcp config init             # Create template config
-  email-mcp scheduler check         # Send overdue scheduled emails
-  email-mcp scheduler install       # Install OS periodic check
+  email-mcp account list             # List configured accounts
+  email-mcp account add              # Add a new email account
+  email-mcp account edit personal    # Edit an account
+  email-mcp account delete work      # Delete an account
+  email-mcp setup                    # Alias for account add
+  email-mcp test                     # Test all accounts
+  email-mcp test personal            # Test specific account
+  email-mcp config show              # Show config (passwords masked)
+  email-mcp config edit              # Edit global settings
+  email-mcp config path              # Print config file path
+  email-mcp config init              # Create template config
+  email-mcp scheduler check          # Send overdue scheduled emails
+  email-mcp scheduler install        # Install OS periodic check
 `.trim();
 
 async function runServer(): Promise<void> {
@@ -127,6 +133,12 @@ async function main(): Promise<void> {
     case 'setup': {
       const { default: runSetup } = await import('./cli/setup.js');
       await runSetup();
+      break;
+    }
+
+    case 'account': {
+      const { default: runAccountCommand } = await import('./cli/account-commands.js');
+      await runAccountCommand(process.argv[3], process.argv[4]);
       break;
     }
 
