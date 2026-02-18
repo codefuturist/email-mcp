@@ -15,7 +15,7 @@ jobs:
       id-token: write   # npm provenance attestation
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # full history for changelog
 
