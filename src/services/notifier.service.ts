@@ -10,8 +10,9 @@
  * All channels are opt-in and disabled by default.
  */
 
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mcpLog } from '../logging.js';
+import { validateWebhookUrl } from '../safety/validation.js';
 
 import type { AlertsConfig } from '../types/index.js';
 
@@ -213,9 +214,9 @@ export default class NotifierService {
 
   /** Test if a command-line tool exists on the system. */
   private static async commandExists(cmd: string): Promise<boolean> {
-    const check = process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`;
+    const bin = process.platform === 'win32' ? 'where' : 'which';
     return new Promise((resolve) => {
-      exec(check, { timeout: 3000 }, (err) => {
+      execFile(bin, [cmd], { timeout: 3000 }, (err) => {
         resolve(!err);
       });
     });
@@ -324,18 +325,21 @@ export default class NotifierService {
   private static async execDarwin(title: string, body: string, sound: boolean): Promise<void> {
     const soundClause = sound ? ' sound name "Glass"' : '';
     const script = `display notification "${body}" with title "${title}"${soundClause}`;
-    await NotifierService.execCommand(`osascript -e '${script}'`);
+    await NotifierService.execCommand('osascript', ['-e', script]);
   }
 
   private static async execLinux(title: string, body: string, sound: boolean): Promise<void> {
     const urgency = sound ? 'critical' : 'normal';
-    const cmds = [`notify-send -u ${urgency} "${title}" "${body}"`];
+    await NotifierService.execCommand('notify-send', ['-u', urgency, title, body]);
     if (sound) {
-      cmds.push(
-        'paplay /usr/share/sounds/freedesktop/stereo/message-new-instant.oga 2>/dev/null || true',
-      );
+      try {
+        await NotifierService.execCommand('paplay', [
+          '/usr/share/sounds/freedesktop/stereo/message-new-instant.oga',
+        ]);
+      } catch {
+        // Sound playback failure is non-fatal
+      }
     }
-    await NotifierService.execCommand(cmds.join(' && '));
   }
 
   private static async execWindows(title: string, body: string): Promise<void> {
@@ -345,12 +349,12 @@ export default class NotifierService {
       `$n.Icon = [System.Drawing.SystemIcons]::Information; ` +
       `$n.Visible = $true; ` +
       `$n.ShowBalloonTip(5000, '${title}', '${body}', 'Info')`;
-    await NotifierService.execCommand(`powershell -Command "${ps}"`);
+    await NotifierService.execCommand('powershell', ['-Command', ps]);
   }
 
-  private static async execCommand(cmd: string): Promise<void> {
+  private static async execCommand(bin: string, args: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
-      exec(cmd, { timeout: 5000 }, (err) => {
+      execFile(bin, args, { timeout: 5000 }, (err) => {
         if (err) reject(err);
         else resolve();
       });
@@ -363,6 +367,17 @@ export default class NotifierService {
 
   private async sendWebhook(payload: AlertPayload): Promise<void> {
     if (!this.config.webhookUrl) return;
+
+    try {
+      validateWebhookUrl(this.config.webhookUrl);
+    } catch (err) {
+      await mcpLog(
+        'warning',
+        'notifier',
+        `Invalid webhook URL: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
 
     const body = JSON.stringify({
       event: `email.${payload.priority}`,

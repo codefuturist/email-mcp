@@ -1,3 +1,29 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 *.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+.mcpregistry_*
+*.pem
+*.key
+
+# Test & coverage
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

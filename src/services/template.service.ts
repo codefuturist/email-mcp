@@ -12,6 +12,7 @@ import path from 'node:path';
 import { parse as parseTOML } from 'smol-toml';
 
 import { TEMPLATES_DIR } from '../config/xdg.js';
+import { sanitizeTemplateVariable } from '../safety/validation.js';
 
 import type { EmailTemplate } from '../types/index.js';
 
@@ -115,22 +116,26 @@ export default class TemplateService {
   async applyTemplate(
     name: string,
     variables: Record<string, string>,
+    html = false,
   ): Promise<{ subject: string; body: string }> {
     const template = await this.getTemplate(name);
+    const sanitized = Object.fromEntries(
+      Object.entries(variables).map(([k, v]) => [k, sanitizeTemplateVariable(v, html)]),
+    );
 
     // Warn about missing variables
-    const missing = template.variables.filter((v) => !(v in variables));
+    const missing = template.variables.filter((v) => !(v in sanitized));
     if (missing.length > 0) {
       const composed = {
-        subject: substituteVariables(template.subject, variables),
-        body: substituteVariables(template.body, variables),
+        subject: substituteVariables(template.subject, sanitized),
+        body: substituteVariables(template.body, sanitized),
       };
       return composed;
     }
 
     return {
-      subject: substituteVariables(template.subject, variables),
-      body: substituteVariables(template.body, variables),
+      subject: substituteVariables(template.subject, sanitized),
+      body: substituteVariables(template.body, sanitized),
     };
   }
 

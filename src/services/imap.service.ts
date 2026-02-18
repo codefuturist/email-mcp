@@ -5,7 +5,8 @@
  */
 
 import type { ImapFlow } from 'imapflow';
-import type ConnectionManager from '../connections/manager.js';
+import type { IConnectionManager } from '../connections/types.js';
+import { sanitizeMailboxName, sanitizeSearchQuery } from '../safety/validation.js';
 import type {
   AttachmentMeta,
   BulkResult,
@@ -216,7 +217,7 @@ async function messageToEmail(
 export default class ImapService {
   private labelStrategies = new Map<string, LabelStrategy>();
 
-  constructor(private connections: ConnectionManager) {}
+  constructor(private connections: IConnectionManager) {}
 
   private async getLabelStrategy(accountName: string): Promise<LabelStrategy> {
     const cached = this.labelStrategies.get(accountName);
@@ -289,7 +290,7 @@ export default class ImapService {
     } = {},
   ): Promise<PaginatedResult<EmailMeta>> {
     const client = await this.connections.getImapClient(accountName);
-    const mailbox = options.mailbox ?? 'INBOX';
+    const mailbox = sanitizeMailboxName(options.mailbox ?? 'INBOX');
     const page = options.page ?? 1;
     const pageSize = options.pageSize ?? 20;
 
@@ -392,8 +393,9 @@ export default class ImapService {
   async getEmail(accountName: string, emailId: string, mailbox = 'INBOX'): Promise<Email> {
     const client = await this.connections.getImapClient(accountName);
     const uid = parseInt(emailId, 10);
+    const safeMailbox = sanitizeMailboxName(mailbox);
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await client.getMailboxLock(safeMailbox);
     try {
       const msg = await client.fetchOne(
         String(uid),
@@ -494,16 +496,17 @@ export default class ImapService {
     } = {},
   ): Promise<PaginatedResult<EmailMeta>> {
     const client = await this.connections.getImapClient(accountName);
-    const mailbox = options.mailbox ?? 'INBOX';
+    const mailbox = sanitizeMailboxName(options.mailbox ?? 'INBOX');
     const page = options.page ?? 1;
     const pageSize = options.pageSize ?? 20;
+    const sanitizedQuery = query ? sanitizeSearchQuery(query) : '';
 
     const lock = await client.getMailboxLock(mailbox);
     try {
       // Build search criteria — base query OR across subject/from/body
-      const baseCriteria: Record<string, unknown> = {
-        or: [{ subject: query }, { from: query }, { body: query }],
-      };
+      const baseCriteria: Record<string, unknown> = sanitizedQuery
+        ? { or: [{ subject: sanitizedQuery }, { from: sanitizedQuery }, { body: sanitizedQuery }] }
+        : {};
 
       // Build additional filters as AND conditions
       const andConditions: Record<string, unknown>[] = [baseCriteria];
@@ -756,14 +759,14 @@ export default class ImapService {
     destinationMailbox: string,
   ): Promise<void> {
     const client = await this.connections.getImapClient(accountName);
-    await ImapService.assertRealMailbox(client, sourceMailbox);
-    const lock = await client.getMailboxLock(sourceMailbox);
+    const safeSource = sanitizeMailboxName(sourceMailbox);
+    const safeDest = sanitizeMailboxName(destinationMailbox);
+    await ImapService.assertRealMailbox(client, safeSource);
+    const lock = await client.getMailboxLock(safeSource);
     try {
-      const ok = await client.messageMove(emailId, destinationMailbox, { uid: true });
+      const ok = await client.messageMove(emailId, safeDest, { uid: true });
       if (!ok) {
-        throw new Error(
-          `IMAP server rejected the move from "${sourceMailbox}" to "${destinationMailbox}".`,
-        );
+        throw new Error(`IMAP server rejected the move from "${safeSource}" to "${safeDest}".`);
       }
     } finally {
       lock.release();
@@ -777,9 +780,10 @@ export default class ImapService {
     permanent = false,
   ): Promise<void> {
     const client = await this.connections.getImapClient(accountName);
+    const safeMailbox = sanitizeMailboxName(mailbox);
 
     if (permanent) {
-      const lock = await client.getMailboxLock(mailbox);
+      const lock = await client.getMailboxLock(safeMailbox);
       try {
         const ok = await client.messageDelete(emailId, { uid: true });
         if (!ok) {
@@ -789,12 +793,12 @@ export default class ImapService {
         lock.release();
       }
     } else {
-      await ImapService.assertRealMailbox(client, mailbox);
+      await ImapService.assertRealMailbox(client, safeMailbox);
       const mailboxes = await client.list();
       const trash = mailboxes.find((mb) => mb.specialUse === '\\Trash');
       const trashPath = trash?.path ?? 'Trash';
 
-      const lock = await client.getMailboxLock(mailbox);
+      const lock = await client.getMailboxLock(safeMailbox);
       try {
         const ok = await client.messageMove(emailId, trashPath, { uid: true });
         if (!ok) {
@@ -817,7 +821,8 @@ export default class ImapService {
     action: 'read' | 'unread' | 'flag' | 'unflag',
   ): Promise<void> {
     const client = await this.connections.getImapClient(accountName);
-    const lock = await client.getMailboxLock(mailbox);
+    const safeMailbox = sanitizeMailboxName(mailbox);
+    const lock = await client.getMailboxLock(safeMailbox);
     try {
       const flagMap: Record<string, { flags: string[]; add: boolean }> = {
         read: { flags: ['\\Seen'], add: true },

@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import audit from '../safety/audit.js';
+import { sanitizeMailboxName } from '../safety/validation.js';
 
 import type ImapService from '../services/imap.service.js';
 
@@ -28,7 +29,9 @@ export default function registerManageTools(server: McpServer, imapService: Imap
     { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     async ({ account, emailId, sourceMailbox, destinationMailbox }) => {
       try {
-        await imapService.moveEmail(account, emailId, sourceMailbox, destinationMailbox);
+        const cleanSource = sanitizeMailboxName(sourceMailbox);
+        const cleanDest = sanitizeMailboxName(destinationMailbox);
+        await imapService.moveEmail(account, emailId, cleanSource, cleanDest);
         await audit.log(
           'move_email',
           account,
@@ -81,7 +84,8 @@ export default function registerManageTools(server: McpServer, imapService: Imap
     { readOnlyHint: false, destructiveHint: true },
     async ({ account, emailId, mailbox, permanent }) => {
       try {
-        await imapService.deleteEmail(account, emailId, mailbox, permanent);
+        const cleanMailbox = sanitizeMailboxName(mailbox);
+        await imapService.deleteEmail(account, emailId, cleanMailbox, permanent);
         await audit.log('delete_email', account, { emailId, mailbox, permanent }, 'ok');
         return {
           content: [

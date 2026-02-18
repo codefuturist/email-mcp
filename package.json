@@ -1,6 +1,6 @@
 {
   "name": "@codefuturist/email-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.codefuturist/email-mcp",
   "description": "Email MCP server with IMAP + SMTP support",
   "type": "module",
@@ -14,13 +14,16 @@
   ],
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "biome format --write src/",
     "format:check": "biome check src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "check": "biome check src/ && eslint src/",
     "commit": "cog commit",
     "changelog": "cog changelog",
@@ -29,7 +32,7 @@
     "version:bump:minor": "cog bump --minor",
     "version:bump:patch": "cog bump --patch",
     "version:log": "cog log",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "tsc -p tsconfig.build.json"
   },
   "keywords": [
     "email",
@@ -67,15 +70,17 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.0",
     "@eslint/compat": "^2.0.2",
     "@eslint/js": "^9.39.2",
     "@types/node": "^25.2.3",
     "@types/nodemailer": "^7.0.10",
+    "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^9.39.2",
-    "@biomejs/biome": "^2.4.0",
     "eslint-config-airbnb-extended": "^3.0.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=22.0.0"

@@ -4,14 +4,14 @@
  * No MCP dependency — fully unit-testable.
  */
 
-import type ConnectionManager from '../connections/manager.js';
+import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
 import type { SendResult } from '../types/index.js';
 import type ImapService from './imap.service.js';
 
 export default class SmtpService {
   constructor(
-    private connections: ConnectionManager,
+    private connections: IConnectionManager,
     private rateLimiter: RateLimiter,
     private imapService: ImapService,
   ) {}

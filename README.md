@@ -8,7 +8,7 @@
 
 An MCP (Model Context Protocol) server providing comprehensive email capabilities via IMAP and SMTP.
 
-Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 42 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
+Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 47 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
 
 ## Highlights
 
@@ -489,9 +489,9 @@ Features:
 
 ## API
 
-### Tools (37)
+### Tools (47)
 
-#### Read (13)
+#### Read (14)
 
 | Tool | Description |
 |------|-------------|
@@ -499,13 +499,14 @@ Features:
 | `list_mailboxes` | List folders with unread counts and special-use flags |
 | `list_emails` | Paginated email listing with date, sender, subject, and flag filters |
 | `get_email` | Read full email content with attachment metadata |
+| `get_emails` | Fetch full content of multiple emails in a single call (max 20) |
+| `get_email_status` | Get read/flag/label state of an email without fetching the body |
 | `search_emails` | Search by keyword across subject, sender, and body |
 | `download_attachment` | Download an email attachment by filename |
 | `find_email_folder` | Discover the real folder(s) an email resides in (resolves virtual folders) |
 | `extract_contacts` | Extract unique contacts from recent email headers |
 | `get_thread` | Reconstruct a conversation thread via References/In-Reply-To |
 | `list_templates` | List available email templates |
-| `extract_calendar` | Extract ICS/iCalendar events from an email |
 | `get_email_stats` | Email analytics — volume, top senders, daily trends |
 | `check_health` | Connection health, latency, quota, and IMAP capabilities |
 
@@ -545,13 +546,27 @@ Features:
 | `create_label` | Create a new label |
 | `delete_label` | Delete a label |
 
-#### Watcher & Hooks (3)
+#### Watcher & Alerts (6)
 
 | Tool | Description |
 |------|-------------|
 | `get_watcher_status` | Show IMAP IDLE connections, folders being monitored, and last-seen UIDs |
 | `list_presets` | List available AI triage presets with descriptions and suggested labels |
 | `get_hooks_config` | Show current hooks configuration — preset, rules, and custom instructions |
+| `configure_alerts` | Update alert/notification settings at runtime |
+| `check_notification_setup` | Diagnose desktop notification support and provide setup instructions |
+| `test_notification` | Send a test notification to verify OS permissions are configured |
+
+#### Calendar & Reminders (6)
+
+| Tool | Description |
+|------|-------------|
+| `extract_calendar` | Extract ICS/iCalendar events from an email |
+| `analyze_email_for_scheduling` | Analyze an email to detect events and reminder-worthy content |
+| `add_to_calendar` | Add an email event to the local calendar (macOS/Linux) |
+| `create_reminder` | Create a reminder in macOS Reminders.app from an email |
+| `list_calendars` | List all available local calendars |
+| `check_calendar_permissions` | Check whether the local calendar is accessible |
 
 ### Prompts (7)
 

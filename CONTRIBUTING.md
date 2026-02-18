@@ -98,4 +98,4 @@ src/
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [LGPL-3.0-or-later License](LICENSE).

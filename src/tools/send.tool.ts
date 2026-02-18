@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import audit from '../safety/audit.js';
+import { validateInputLength } from '../safety/validation.js';
 
 import type SmtpService from '../services/smtp.service.js';
 
@@ -27,6 +28,8 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
       try {
+        validateInputLength(params.subject, 998, 'Subject');
+        validateInputLength(params.body, 5_000_000, 'Body');
         const result = await smtpService.sendEmail(params.account, params);
         await audit.log(
           'send_email',

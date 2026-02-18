@@ -9,6 +9,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import audit from '../safety/audit.js';
+import { validateLabelName } from '../safety/validation.js';
 
 import type ImapService from '../services/imap.service.js';
 
@@ -76,8 +77,9 @@ export default function registerLabelTools(server: McpServer, imapService: ImapS
     { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     async ({ account, emailId, mailbox, label }) => {
       try {
-        await imapService.addLabel(account, emailId, mailbox, label);
-        await audit.log('add_label', account, { emailId, mailbox, label }, 'ok');
+        const cleanLabel = validateLabelName(label);
+        await imapService.addLabel(account, emailId, mailbox, cleanLabel);
+        await audit.log('add_label', account, { emailId, mailbox, label: cleanLabel }, 'ok');
         return {
           content: [
             { type: 'text' as const, text: `🏷️ Label "${label}" added to email ${emailId}.` },
@@ -149,8 +151,9 @@ export default function registerLabelTools(server: McpServer, imapService: ImapS
     { readOnlyHint: false, destructiveHint: false },
     async ({ account, name }) => {
       try {
-        await imapService.createLabel(account, name);
-        await audit.log('create_label', account, { name }, 'ok');
+        const cleanName = validateLabelName(name);
+        await imapService.createLabel(account, cleanName);
+        await audit.log('create_label', account, { name: cleanName }, 'ok');
         return {
           content: [{ type: 'text' as const, text: `🏷️ Label "${name}" created.` }],
         };

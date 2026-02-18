@@ -14,12 +14,13 @@ import { mcpLog } from '../logging.js';
 
 import type OAuthService from '../services/oauth.service.js';
 import type { AccountConfig } from '../types/index.js';
+import type { IConnectionManager } from './types.js';
 
 type SmtpAuth =
   | { user: string; pass?: string }
   | { type: string; user: string; accessToken: string };
 
-export default class ConnectionManager {
+export default class ConnectionManager implements IConnectionManager {
   private imapClients = new Map<string, ImapFlow>();
 
   private smtpTransports = new Map<string, Transporter>();
