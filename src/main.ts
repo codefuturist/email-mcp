@@ -43,6 +43,7 @@ Commands:
   install     Register/unregister with MCP clients (Claude, Cursor, …)
   config      Config management (show, edit, path, init)
   scheduler   Email scheduling management (check, list, install, uninstall, status)
+  notify      Test and diagnose desktop notifications
   help        Show this help message
 
 Examples:
@@ -63,6 +64,8 @@ Examples:
   email-mcp config init              # Create template config
   email-mcp scheduler check          # Send overdue scheduled emails
   email-mcp scheduler install        # Install OS periodic check
+  email-mcp notify test              # Send a test notification
+  email-mcp notify status            # Check notification platform support
 `.trim();
 
 async function runServer(): Promise<void> {
@@ -182,6 +185,12 @@ async function main(): Promise<void> {
     case 'scheduler': {
       const { default: runSchedulerCommand } = await import('./cli/scheduler.js');
       await runSchedulerCommand(process.argv[3]);
+      break;
+    }
+
+    case 'notify': {
+      const { default: runNotifyCommand } = await import('./cli/notify.js');
+      await runNotifyCommand(process.argv[3]);
       break;
     }
 
