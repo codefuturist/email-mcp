@@ -217,16 +217,28 @@ async function messageToEmail(
 export default class ImapService {
   private labelStrategies = new Map<string, LabelStrategy>();
 
+  private labelStrategyPending = new Map<string, Promise<LabelStrategy>>();
+
   constructor(private connections: IConnectionManager) {}
 
   private async getLabelStrategy(accountName: string): Promise<LabelStrategy> {
     const cached = this.labelStrategies.get(accountName);
     if (cached) return cached;
 
-    const client = await this.connections.getImapClient(accountName);
-    const strategy = await detectLabelStrategy(client);
-    this.labelStrategies.set(accountName, strategy);
-    return strategy;
+    // Deduplicate concurrent detection for the same account
+    const pending = this.labelStrategyPending.get(accountName);
+    if (pending) return pending;
+
+    const promise = (async () => {
+      const client = await this.connections.getImapClient(accountName);
+      const strategy = await detectLabelStrategy(client);
+      this.labelStrategies.set(accountName, strategy);
+      this.labelStrategyPending.delete(accountName);
+      return strategy;
+    })();
+
+    this.labelStrategyPending.set(accountName, promise);
+    return promise;
   }
 
   // -------------------------------------------------------------------------

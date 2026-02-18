@@ -35,7 +35,7 @@ export default function registerLabelTools(server: McpServer, imapService: ImapS
             content: [
               {
                 type: 'text' as const,
-                text: `No labels found. Strategy: ${labels.length === 0 ? 'detected' : labels[0].strategy}. Use create_label to create one.`,
+                text: 'No labels found. Use create_label to create one.',
               },
             ],
           };
@@ -112,8 +112,9 @@ export default function registerLabelTools(server: McpServer, imapService: ImapS
     { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     async ({ account, emailId, mailbox, label }) => {
       try {
-        await imapService.removeLabel(account, emailId, mailbox, label);
-        await audit.log('remove_label', account, { emailId, mailbox, label }, 'ok');
+        const cleanLabel = validateLabelName(label);
+        await imapService.removeLabel(account, emailId, mailbox, cleanLabel);
+        await audit.log('remove_label', account, { emailId, mailbox, label: cleanLabel }, 'ok');
         return {
           content: [
             {

@@ -264,7 +264,7 @@ export default class HooksService {
     if (actions.labels?.length) {
       const labelOps = actions.labels.map(async (label) => {
         try {
-          await this.imapService.addLabel(email.account, email.mailbox, email.meta.id, label);
+          await this.imapService.addLabel(email.account, email.meta.id, email.mailbox, label);
         } catch {
           await mcpLog(
             'warning',
@@ -434,7 +434,7 @@ export default class HooksService {
     if (this.config.autoLabel && triage.labels?.length) {
       const labelOps = triage.labels.map(async (label) => {
         try {
-          await this.imapService.addLabel(email.account, email.mailbox, email.meta.id, label);
+          await this.imapService.addLabel(email.account, email.meta.id, email.mailbox, label);
         } catch {
           await mcpLog(
             'warning',

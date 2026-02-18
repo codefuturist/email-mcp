@@ -88,10 +88,13 @@ function createProtonMailStrategy(): LabelStrategy {
         if (!results || !Array.isArray(results) || results.length === 0) {
           throw new Error(`Email not found in label "${label}".`);
         }
-        const result = await client.messageDelete(String(results[0]), { uid: true });
-        if (!result) {
-          throw new Error(`Server rejected removing label "${label}".`);
-        }
+        const deleteOps = results.map(async (uid) => {
+          const ok = await client.messageDelete(String(uid), { uid: true });
+          if (!ok) {
+            throw new Error(`Server rejected removing label "${label}" for UID ${uid}.`);
+          }
+        });
+        await Promise.all(deleteOps);
       } finally {
         labelLock.release();
       }
