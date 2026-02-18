@@ -348,7 +348,9 @@ export default function registerCalendarTools(
         };
       }
       const lines = [`Found ${calendars.length} calendar(s):`, ''];
-      calendars.forEach((c, i) => lines.push(`  ${i + 1}. ${c.name} (id: ${c.id})`));
+      calendars.forEach((c, i) => {
+        lines.push(`  ${i + 1}. ${c.name} (id: ${c.id})`);
+      });
       return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
     },
   );

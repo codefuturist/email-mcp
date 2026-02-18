@@ -123,7 +123,13 @@ async function listListsMacOS(): Promise<ReminderListInfo[]> {
 }
 
 function escapeAS(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r\n/g, '\\n')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
 }
 
 function buildReminderAppleScript(input: ReminderInput, confirm: boolean): string {

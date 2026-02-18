@@ -10,10 +10,12 @@
  * of this state — it only gates the automatic hook trigger.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { CALENDAR_STATE_FILE } from '../config/xdg.js';
+
+const LOCK_FILE = `${CALENDAR_STATE_FILE}.lock`;
 
 export type CalendarAction = 'event' | 'reminder' | 'both' | 'skipped';
 
@@ -45,6 +47,39 @@ async function writeState(state: StateFile): Promise<void> {
   await writeFile(CALENDAR_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
 }
 
+/**
+ * Acquire a file-based lock, execute fn, then release.
+ * Uses exclusive file creation (O_CREAT | O_EXCL) to prevent concurrent writes.
+ */
+async function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(LOCK_FILE), { recursive: true });
+
+  const acquire = async (retries: number): Promise<Awaited<ReturnType<typeof open>>> => {
+    try {
+      return await open(LOCK_FILE, 'wx');
+    } catch {
+      if (retries <= 0) {
+        // Stale lock fallback — force acquire after retries exhausted
+        return open(LOCK_FILE, 'w');
+      }
+      return new Promise<Awaited<ReturnType<typeof open>>>((resolve) => {
+        setTimeout(() => {
+          resolve(acquire(retries - 1));
+        }, 50);
+      });
+    }
+  };
+
+  const lockHandle = await acquire(20);
+
+  try {
+    return await fn();
+  } finally {
+    await lockHandle.close();
+    await unlink(LOCK_FILE).catch(() => {});
+  }
+}
+
 /** Returns true if this email has already been auto-processed by the hook system. */
 export async function isCalendarProcessed(accountName: string, emailId: string): Promise<boolean> {
   const state = await readState();
@@ -58,13 +93,15 @@ export async function markCalendarProcessed(
   action: CalendarAction,
   title?: string,
 ): Promise<void> {
-  const state = await readState();
-  state.processedEmails[stateKey(accountName, emailId)] = {
-    processedAt: new Date().toISOString(),
-    action,
-    title,
-  };
-  await writeState(state);
+  await withStateLock(async () => {
+    const state = await readState();
+    state.processedEmails[stateKey(accountName, emailId)] = {
+      processedAt: new Date().toISOString(),
+      action,
+      title,
+    };
+    await writeState(state);
+  });
 }
 
 /** Returns all processed entries (for inspection/debugging). */

@@ -123,7 +123,13 @@ interface JXAScriptOptions {
 
 /** @internal Exported for testing. */
 export function escapeAS(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r\n/g, '\\n')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
 }
 
 /**
@@ -241,7 +247,7 @@ function buildAppleScript(opts: JXAScriptOptions): string {
     lines.push(`  set eventProps to eventProps & {description:"${notes}"}`);
   }
   if (url) {
-    lines.push(`  set eventProps to eventProps & {url:"${escapeAS(event.url ?? '')}"}`);
+    lines.push(`  set eventProps to eventProps & {url:"${url}"}`);
   }
   lines.push(
     '  set theEvent to make new event at end of events of theCal with properties eventProps',
