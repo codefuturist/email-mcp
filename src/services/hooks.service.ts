@@ -15,6 +15,7 @@ import type { EmailMeta, HookRule, HooksConfig } from '../types/index.js';
 import type { NewEmailEvent } from './event-bus.js';
 import eventBus from './event-bus.js';
 import type ImapService from './imap.service.js';
+import LocalCalendarService from './local-calendar.service.js';
 import type { AlertPayload, UrgencyLevel } from './notifier.service.js';
 import NotifierService from './notifier.service.js';
 
@@ -29,6 +30,7 @@ interface TriageResult {
   labels?: string[];
   flag?: boolean;
   action?: string;
+  addToCalendar?: boolean;
 }
 
 interface BatchEmail {
@@ -99,12 +101,15 @@ export default class HooksService {
 
   private readonly notifier: NotifierService;
 
+  private readonly localCalendar: LocalCalendarService;
+
   private static readonly MAX_SAMPLING_PER_MIN = 10;
 
   constructor(config: HooksConfig, imapService: ImapService) {
     this.config = config;
     this.imapService = imapService;
     this.notifier = new NotifierService(config.alerts);
+    this.localCalendar = new LocalCalendarService();
     this.resolvedSystemPrompt = buildSystemPrompt(config.preset, {
       customInstructions: config.customInstructions,
       systemPrompt: config.systemPrompt,
@@ -299,6 +304,11 @@ export default class HooksService {
       ruleName: rule.name,
     };
     await this.notifier.alert(payload, actions.alert === true);
+
+    // Add to calendar if rule requests it or global auto_calendar is on
+    if (actions.addToCalendar ?? this.config.autoCalendar) {
+      await this.applyCalendarAction(email);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -445,6 +455,113 @@ export default class HooksService {
     if (triage.action) {
       await mcpLog('info', 'hooks', `   Action: ${triage.action}`);
     }
+
+    // Add to calendar if AI triage requested it or global auto_calendar is on
+    if (triage.addToCalendar ?? this.config.autoCalendar) {
+      await this.applyCalendarAction(email);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Calendar auto-add helper
+  // -------------------------------------------------------------------------
+
+  private async applyCalendarAction(email: BatchEmail): Promise<void> {
+    const { buildCalendarNotes } = await import('../utils/calendar-notes.js');
+    const { extractConferenceDetails } = await import('../utils/conference-details.js');
+    const { extractMeetingUrl } = await import('../utils/meeting-url.js');
+    const { CALENDAR_ATTACHMENTS_DIR } = await import('../config/xdg.js');
+    const path = await import('node:path');
+
+    try {
+      const full = await this.imapService.getEmail(email.account, email.meta.id, email.mailbox);
+      const bodyText = full.bodyText ?? '';
+      const bodyHtml = full.bodyHtml ?? '';
+      const combined = `${bodyText}\n${bodyHtml}`;
+
+      // Try ICS extraction
+      let start = new Date(full.date);
+      let end = new Date(start.getTime() + 60 * 60 * 1000);
+      let location: string | undefined;
+
+      try {
+        const { default: CalSvc } = await import('./calendar.service.js');
+        const calSvc = new CalSvc();
+        const icsContents = await this.imapService.getCalendarParts(
+          email.account,
+          email.mailbox,
+          email.meta.id,
+        );
+        if (icsContents.length > 0) {
+          const events = calSvc.extractFromParts(icsContents);
+          if (events.length > 0) {
+            start = new Date(events[0].start);
+            end = new Date(events[0].end);
+            location = events[0].location;
+          }
+        }
+      } catch {
+        // ICS extraction is best-effort
+      }
+
+      const meetingUrl = extractMeetingUrl(combined);
+      const conference = extractConferenceDetails(bodyText || bodyHtml);
+
+      // Save attachments
+      let savedAttachments: Awaited<ReturnType<typeof this.imapService.saveEmailAttachments>> = [];
+      if (full.attachments.length > 0) {
+        const destDir = path.join(
+          CALENDAR_ATTACHMENTS_DIR,
+          `${email.account}-${email.meta.id}`.replace(/[^a-zA-Z0-9-_]/g, '_'),
+        );
+        savedAttachments = await this.imapService.saveEmailAttachments(
+          email.account,
+          email.meta.id,
+          email.mailbox,
+          destDir,
+        );
+      }
+
+      const notes = buildCalendarNotes({
+        emailFrom: full.from.name
+          ? `${full.from.name} <${full.from.address}>`
+          : full.from.address,
+        emailSubject: full.subject,
+        emailDate: new Date(full.date).toLocaleString(),
+        meetingUrl: meetingUrl?.url,
+        meetingUrlLabel: meetingUrl?.label,
+        dialIn: conference?.dialIn,
+        meetingId: conference?.meetingId,
+        passcode: conference?.passcode,
+        conferenceProvider: conference?.provider,
+        bodyExcerpt: bodyText || bodyHtml,
+        savedAttachments,
+      });
+
+      const result = await this.localCalendar.addEvent(
+        {
+          title: full.subject,
+          start,
+          end,
+          location,
+          notes,
+          url: meetingUrl?.url,
+          urlLabel: meetingUrl?.label,
+          alarmMinutes: this.config.calendarAlarmMinutes ?? 15,
+          savedAttachments,
+          dialIn: conference?.dialIn,
+          meetingId: conference?.meetingId,
+          passcode: conference?.passcode,
+        },
+        this.config.calendarName !== '' ? this.config.calendarName : undefined,
+        { confirm: this.config.calendarConfirm !== false },
+      );
+
+      await mcpLog('info', 'hooks', `Calendar: ${result.message}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await mcpLog('warning', 'hooks', `Calendar auto-add failed: ${msg}`);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -480,6 +597,8 @@ export default class HooksService {
         : undefined,
       flag: typeof obj.flag === 'boolean' ? obj.flag : undefined,
       action: typeof obj.action === 'string' ? obj.action.slice(0, 200) : undefined,
+      addToCalendar:
+        typeof obj.add_to_calendar === 'boolean' ? obj.add_to_calendar : undefined,
     };
   }
 }

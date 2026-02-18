@@ -91,6 +91,8 @@ export interface HookRuleActions {
   flag?: boolean;
   markRead?: boolean;
   alert?: boolean;
+  /** Add the email's calendar event to the local calendar (triggers confirmation dialog). */
+  addToCalendar?: boolean;
 }
 
 export interface HookRule {
@@ -125,6 +127,14 @@ export interface HooksConfig {
   systemPrompt?: string;
   rules: HookRule[];
   alerts: AlertsConfig;
+  /** Automatically add calendar events detected in new emails to the local calendar. */
+  autoCalendar?: boolean;
+  /** Target calendar name for auto-add (empty = default calendar). */
+  calendarName?: string;
+  /** Minutes before event to show an alert (default: 15). */
+  calendarAlarmMinutes?: number;
+  /** Show a native confirmation dialog before adding (default: true). */
+  calendarConfirm?: boolean;
 }
 
 export interface AppConfig {

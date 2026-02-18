@@ -1171,8 +1171,81 @@ export default class ImapService {
   }
 
   // -------------------------------------------------------------------------
-  // Thread reconstruction
+  // Save all email attachments to a local directory
   // -------------------------------------------------------------------------
+
+  /**
+   * Download and save all non-ICS attachments from an email to a local directory.
+   * Returns metadata including the saved file paths and file:// URLs.
+   *
+   * Attachments larger than maxSizeBytes (default 25 MB) are skipped.
+   */
+  async saveEmailAttachments(
+    accountName: string,
+    emailId: string,
+    mailbox: string,
+    destDir: string,
+    maxSizeBytes = 25 * 1024 * 1024,
+  ): Promise<
+    {
+      filename: string;
+      localPath: string;
+      fileUrl: string;
+      mimeType: string;
+      size: number;
+    }[]
+  > {
+    const client = await this.connections.getImapClient(accountName);
+    const uid = parseInt(emailId, 10);
+
+    const lock = await client.getMailboxLock(mailbox);
+    let attachmentMetas: AttachmentMeta[] = [];
+    try {
+      const msg = await client.fetchOne(
+        String(uid),
+        { uid: true, bodyStructure: true },
+        { uid: true },
+      );
+      if (!msg) return [];
+      attachmentMetas = extractAttachments(msg.bodyStructure).filter(
+        (a) => a.size <= maxSizeBytes && !a.mimeType.includes('calendar') && !a.filename.toLowerCase().endsWith('.ics'),
+      );
+    } finally {
+      lock.release();
+    }
+
+    if (attachmentMetas.length === 0) return [];
+
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(destDir, { recursive: true });
+
+    const results = await Promise.allSettled(
+      attachmentMetas.map(async (meta) => {
+        const downloaded = await this.downloadAttachment(
+          accountName,
+          emailId,
+          mailbox,
+          meta.filename,
+          maxSizeBytes,
+        );
+        const safe = meta.filename.replace(/[/\\?%*:|"<>]/g, '_');
+        const localPath = `${destDir}/${safe}`;
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(localPath, Buffer.from(downloaded.contentBase64, 'base64'));
+        return {
+          filename: meta.filename,
+          localPath,
+          fileUrl: `file://${localPath}`,
+          mimeType: meta.mimeType,
+          size: downloaded.size,
+        };
+      }),
+    );
+
+    return results
+      .filter((r) => r.status === 'fulfilled')
+      .map((r) => (r as PromiseFulfilledResult<(typeof results)[0] extends PromiseFulfilledResult<infer T> ? T : never>).value);
+  }
 
   /**
    * Reconstruct an email thread by following References / In-Reply-To chains.

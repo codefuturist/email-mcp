@@ -81,6 +81,13 @@ function loadFromEnv(): RawAppConfig | null {
           webhook_url: process.env.MCP_EMAIL_ALERT_WEBHOOK_URL ?? '',
           webhook_events: ['urgent', 'high'],
         },
+        auto_calendar: process.env.MCP_EMAIL_HOOK_AUTO_CALENDAR === 'true',
+        calendar_name: process.env.MCP_EMAIL_HOOK_CALENDAR_NAME ?? '',
+        calendar_alarm_minutes: parseInt(
+          process.env.MCP_EMAIL_HOOK_CALENDAR_ALARM_MINUTES ?? '15',
+          10,
+        ),
+        calendar_confirm: process.env.MCP_EMAIL_HOOK_CALENDAR_CONFIRM !== 'false',
       },
     },
     accounts: [
@@ -192,6 +199,10 @@ function normalizeHookRule(raw: {
       flag: typeof raw.actions.flag === 'boolean' ? raw.actions.flag : undefined,
       markRead: typeof raw.actions.mark_read === 'boolean' ? raw.actions.mark_read : undefined,
       alert: typeof raw.actions.alert === 'boolean' ? raw.actions.alert : undefined,
+      addToCalendar:
+        typeof raw.actions.add_to_calendar === 'boolean'
+          ? raw.actions.add_to_calendar
+          : undefined,
     },
   };
 }
@@ -222,6 +233,10 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
           webhookUrl: raw.settings.hooks.alerts?.webhook_url ?? '',
           webhookEvents: raw.settings.hooks.alerts?.webhook_events ?? ['urgent', 'high'],
         },
+        autoCalendar: raw.settings.hooks.auto_calendar ?? false,
+        calendarName: raw.settings.hooks.calendar_name ?? '',
+        calendarAlarmMinutes: raw.settings.hooks.calendar_alarm_minutes ?? 15,
+        calendarConfirm: raw.settings.hooks.calendar_confirm ?? true,
       },
     },
     accounts: raw.accounts.map(normalizeAccount),

@@ -38,3 +38,6 @@ export const SCHEDULED_DIR = path.join(xdg.state, 'scheduled');
 
 /** Directory for sent scheduled email records */
 export const SCHEDULED_SENT_DIR = path.join(xdg.state, 'scheduled', 'sent');
+
+/** Directory for attachments saved when adding email events to the local calendar */
+export const CALENDAR_ATTACHMENTS_DIR = path.join(xdg.data, 'calendar-attachments');

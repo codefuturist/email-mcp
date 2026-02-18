@@ -22,6 +22,7 @@ import createServer, { PKG_VERSION } from './server.js';
 import CalendarService from './services/calendar.service.js';
 import HooksService from './services/hooks.service.js';
 import ImapService from './services/imap.service.js';
+import LocalCalendarService from './services/local-calendar.service.js';
 import OAuthService from './services/oauth.service.js';
 import SchedulerService from './services/scheduler.service.js';
 import SmtpService from './services/smtp.service.js';
@@ -78,6 +79,7 @@ async function runServer(): Promise<void> {
   const smtpService = new SmtpService(connections, rateLimiter, imapService);
   const templateService = new TemplateService();
   const calendarService = new CalendarService();
+  const localCalendarService = new LocalCalendarService();
   const schedulerService = new SchedulerService(smtpService, imapService);
   const watcherService = new WatcherService(config.settings.watcher, config.accounts);
   const hooksService = new HooksService(config.settings.hooks, imapService);
@@ -93,6 +95,7 @@ async function runServer(): Promise<void> {
     config,
     templateService,
     calendarService,
+    localCalendarService,
     schedulerService,
     watcherService,
     hooksService,

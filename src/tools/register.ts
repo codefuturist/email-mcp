@@ -10,6 +10,7 @@ import type ConnectionManager from '../connections/manager.js';
 import type CalendarService from '../services/calendar.service.js';
 import type HooksService from '../services/hooks.service.js';
 import type ImapService from '../services/imap.service.js';
+import type LocalCalendarService from '../services/local-calendar.service.js';
 import type SchedulerService from '../services/scheduler.service.js';
 import type SmtpService from '../services/smtp.service.js';
 import type TemplateService from '../services/template.service.js';
@@ -43,6 +44,7 @@ export default function registerAllTools(
   config: AppConfig,
   templateService: TemplateService,
   calendarService: CalendarService,
+  localCalendarService: LocalCalendarService,
   schedulerService: SchedulerService,
   watcherService: WatcherService,
   hooksService: HooksService,
@@ -57,7 +59,7 @@ export default function registerAllTools(
   registerContactsTools(server, imapService);
   registerThreadTools(server, imapService);
   registerTemplateReadTools(server, templateService);
-  registerCalendarTools(server, imapService, calendarService);
+  registerCalendarTools(server, imapService, calendarService, localCalendarService);
   registerAnalyticsTools(server, imapService);
   registerHealthTools(server, connections, imapService);
   registerLocateTools(server, imapService);

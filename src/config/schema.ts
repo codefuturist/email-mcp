@@ -74,6 +74,7 @@ export const HookRuleActionsSchema = z.object({
   flag: z.boolean().optional(),
   mark_read: z.boolean().optional(),
   alert: z.boolean().optional(),
+  add_to_calendar: z.boolean().optional(),
 });
 
 export const HookRuleSchema = z.object({
@@ -108,6 +109,10 @@ export const HooksConfigSchema = z.object({
     webhook_url: '',
     webhook_events: ['urgent', 'high'],
   }),
+  auto_calendar: z.boolean().default(false),
+  calendar_name: z.string().default(''),
+  calendar_alarm_minutes: z.number().int().min(0).max(1440).default(15),
+  calendar_confirm: z.boolean().default(true),
 });
 
 export const SettingsSchema = z.object({
@@ -132,6 +137,10 @@ export const SettingsSchema = z.object({
       webhook_url: '',
       webhook_events: ['urgent', 'high'],
     },
+    auto_calendar: false,
+    calendar_name: '',
+    calendar_alarm_minutes: 15,
+    calendar_confirm: true,
   }),
 });
 
@@ -158,6 +167,10 @@ export const AppConfigFileSchema = z.object({
         webhook_url: '',
         webhook_events: ['urgent', 'high'],
       },
+      auto_calendar: false,
+      calendar_name: '',
+      calendar_alarm_minutes: 15,
+      calendar_confirm: true,
     },
   }),
   accounts: z.array(AccountConfigSchema).min(1, 'At least one account is required'),
