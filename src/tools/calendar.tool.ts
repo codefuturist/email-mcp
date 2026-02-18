@@ -3,10 +3,12 @@
  *
  * - extract_calendar            — parse ICS/iCalendar from email
  * - add_to_calendar             — add email event to local calendar (with confirmation dialog + dedup)
- * - create_reminder             — create a reminder in macOS Reminders.app from email
- * - analyze_email_for_scheduling — detect events + reminders in email; AI decides what to create
  * - check_calendar_permissions  — check OS calendar/reminders access
  * - list_calendars              — list available local calendars
+ * - list_events                 — search/list local calendar events
+ * - list_reminders              — search/list reminders from Reminders.app
+ * - create_reminder             — create a reminder in macOS Reminders.app from email
+ * - analyze_email_for_scheduling — detect events + reminders in email; AI decides what to create
  */
 
 import { join } from 'node:path';
@@ -347,6 +349,150 @@ export default function registerCalendarTools(
       }
       const lines = [`Found ${calendars.length} calendar(s):`, ''];
       calendars.forEach((c, i) => lines.push(`  ${i + 1}. ${c.name} (id: ${c.id})`));
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // list_events
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    'list_events',
+    [
+      'List local calendar events with optional filters.',
+      'Search by title, date range, or calendar name.',
+      'Use to check for existing events before creating new ones, or to verify a recently added event.',
+      'Returns event id, title, start/end time, location, and calendar name.',
+    ].join(' '),
+    {
+      title: z
+        .string()
+        .optional()
+        .describe('Filter events whose title contains this text (case-insensitive)'),
+      from: z
+        .string()
+        .optional()
+        .describe(
+          'Show events on or after this date (ISO 8601, e.g. 2026-02-19). Defaults to 7 days ago.',
+        ),
+      to: z
+        .string()
+        .optional()
+        .describe(
+          'Show events on or before this date (ISO 8601, e.g. 2026-02-28). Defaults to 30 days from now.',
+        ),
+      calendar_name: z.string().optional().describe('Restrict to a specific calendar by name'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe('Maximum number of results (default: 20)'),
+    },
+    { readOnlyHint: true, destructiveHint: false },
+    async ({ title, from, to, calendar_name: calendarName, limit }) => {
+      const events = await localCalendarService.listEvents({
+        title,
+        from,
+        to,
+        calendarName,
+        limit,
+      });
+
+      if (events.length === 0) {
+        const filterDesc = title ? ` matching "${title}"` : '';
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `No events found${filterDesc}. Try adjusting the date range or title filter.`,
+            },
+          ],
+        };
+      }
+
+      const lines = [`\uD83D\uDCC5 Found ${events.length} event(s):`, ''];
+      events.forEach((ev, i) => {
+        const loc = ev.location ? ` \uD83D\uDCCD ${ev.location}` : '';
+        lines.push(
+          `  ${i + 1}. ${ev.title}`,
+          `     \uD83D\uDD50 ${ev.start} \u2013 ${ev.end}`,
+          `     \uD83D\uDCC6 ${ev.calendar}${loc}`,
+          `     ID: ${ev.id}`,
+          '',
+        );
+      });
+
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // list_reminders
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    'list_reminders',
+    [
+      'List reminders from macOS Reminders.app with optional filters.',
+      'Search by title or list name. By default only shows incomplete reminders.',
+      'Use to check for existing reminders before creating new ones, or to verify a recently added reminder.',
+      'Returns reminder id, title, due date, completion status, priority, and list name.',
+    ].join(' '),
+    {
+      title: z
+        .string()
+        .optional()
+        .describe('Filter reminders whose title contains this text (case-insensitive)'),
+      list_name: z.string().optional().describe('Restrict to a specific Reminders list by name'),
+      include_completed: z
+        .boolean()
+        .default(false)
+        .describe('Include completed reminders (default: false)'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe('Maximum number of results (default: 20)'),
+    },
+    { readOnlyHint: true, destructiveHint: false },
+    async ({ title, list_name: listName, include_completed: includeCompleted, limit }) => {
+      const reminders = await remindersService.listReminders({
+        title,
+        listName,
+        includeCompleted,
+        limit,
+      });
+
+      if (reminders.length === 0) {
+        const filterDesc = title ? ` matching "${title}"` : '';
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `No reminders found${filterDesc}. Try adjusting the title filter or set include_completed=true.`,
+            },
+          ],
+        };
+      }
+
+      const lines = [`\uD83D\uDD14 Found ${reminders.length} reminder(s):`, ''];
+      reminders.forEach((r, i) => {
+        const status = r.completed ? '\u2705' : '\u2B1C';
+        const due = r.dueDate ? ` \uD83D\uDD50 ${r.dueDate}` : '';
+        const priority = r.priority !== 'none' ? ` \u26A0\uFE0F ${r.priority}` : '';
+        lines.push(
+          `  ${i + 1}. ${status} ${r.title}`,
+          `     \uD83D\uDCCB ${r.list}${due}${priority}`,
+          `     ID: ${r.id}`,
+          '',
+        );
+      });
+
       return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
     },
   );

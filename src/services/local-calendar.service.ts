@@ -80,6 +80,28 @@ export interface CalendarInfo {
   name: string;
 }
 
+export interface CalendarEventSummary {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  location?: string;
+  calendar: string;
+}
+
+export interface ListEventsOptions {
+  /** Filter events whose title contains this substring (case-insensitive). */
+  title?: string;
+  /** Only return events on or after this date (ISO 8601). */
+  from?: string;
+  /** Only return events on or before this date (ISO 8601). */
+  to?: string;
+  /** Restrict to a specific calendar by name. */
+  calendarName?: string;
+  /** Maximum number of results (default 20). */
+  limit?: number;
+}
+
 export interface PermissionResult {
   granted: boolean;
   platform: string;
@@ -444,6 +466,86 @@ async function addEventLinux(
   }
 }
 
+async function listEventsMacOS(opts: ListEventsOptions): Promise<CalendarEventSummary[]> {
+  const limit = opts.limit ?? 20;
+  const titleFilter = opts.title ? escapeAS(opts.title) : '';
+  const calFilter = opts.calendarName ? escapeAS(opts.calendarName) : '';
+
+  // Default range: today ± 30 days
+  const now = new Date();
+  const defaultFrom = new Date(now);
+  defaultFrom.setDate(defaultFrom.getDate() - 7);
+  const defaultTo = new Date(now);
+  defaultTo.setDate(defaultTo.getDate() + 30);
+
+  const fromDate = opts.from ? new Date(opts.from) : defaultFrom;
+  const toDate = opts.to ? new Date(opts.to) : defaultTo;
+
+  const script = `
+set fromDate to current date
+${dateToAppleScriptLines('fromDate', fromDate).slice(1).join('\n')}
+
+set toDate to current date
+${dateToAppleScriptLines('toDate', toDate).slice(1).join('\n')}
+
+set jsonResult to "["
+set resultCount to 0
+set maxResults to ${limit}
+set titleFilter to "${titleFilter}"
+set calFilter to "${calFilter}"
+
+tell application "Calendar"
+  repeat with c in calendars
+    if resultCount ≥ maxResults then exit repeat
+    set calName to name of c
+    if calFilter is "" or calName is calFilter then
+      try
+        set evList to (every event of c whose start date ≥ fromDate and start date ≤ toDate)
+        repeat with ev in evList
+          if resultCount ≥ maxResults then exit repeat
+          set evTitle to summary of ev
+          set matchesTitle to true
+          if titleFilter is not "" then
+            considering case
+              if evTitle does not contain titleFilter then set matchesTitle to false
+            end considering
+            ignoring case
+              if not matchesTitle then
+                if evTitle contains titleFilter then set matchesTitle to true
+              end if
+            end ignoring
+          end if
+          if matchesTitle then
+            set evId to uid of ev
+            set evStart to start date of ev
+            set evEnd to end date of ev
+            set evLoc to ""
+            try
+              set evLoc to location of ev
+            end try
+            if evLoc is missing value then set evLoc to ""
+            if resultCount > 0 then set jsonResult to jsonResult & ","
+            set jsonResult to jsonResult & "{\\"id\\":\\"" & evId & "\\",\\"title\\":\\"" & evTitle & "\\",\\"start\\":\\"" & (evStart as text) & "\\",\\"end\\":\\"" & (evEnd as text) & "\\",\\"location\\":\\"" & evLoc & "\\",\\"calendar\\":\\"" & calName & "\\"}"
+            set resultCount to resultCount + 1
+          end if
+        end repeat
+      end try
+    end if
+  end repeat
+end tell
+
+set jsonResult to jsonResult & "]"
+return jsonResult
+`;
+
+  try {
+    const { stdout } = await execFile('osascript', ['-e', script], { timeout: 15_000 });
+    return JSON.parse(stdout.trim()) as CalendarEventSummary[];
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -500,5 +602,11 @@ export default class LocalCalendarService {
       return addEventMacOS(event, calendarName, confirm);
     }
     return addEventLinux(event, calendarName);
+  }
+
+  /** List calendar events matching the given filters. */
+  async listEvents(opts: ListEventsOptions = {}): Promise<CalendarEventSummary[]> {
+    if (this.platform !== 'darwin') return [];
+    return listEventsMacOS(opts);
   }
 }

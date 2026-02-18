@@ -42,6 +42,26 @@ export interface ReminderListInfo {
   name: string;
 }
 
+export interface ReminderSummary {
+  id: string;
+  title: string;
+  dueDate?: string;
+  completed: boolean;
+  priority: string;
+  list: string;
+}
+
+export interface ListRemindersOptions {
+  /** Filter reminders whose title contains this substring (case-insensitive). */
+  title?: string;
+  /** Restrict to a specific Reminders list by name. */
+  listName?: string;
+  /** Include completed reminders (default: false). */
+  includeCompleted?: boolean;
+  /** Maximum number of results (default 20). */
+  limit?: number;
+}
+
 // ---------------------------------------------------------------------------
 // AppleScript priority mapping: none=0, low=9, medium=5, high=1
 // ---------------------------------------------------------------------------
@@ -182,11 +202,17 @@ function buildReminderAppleScript(input: ReminderInput, confirm: boolean): strin
   );
 
   if (dueDate) {
-    const dueParsed = dueDate.replace(/\.\d+Z$/, '');
+    const d = new Date(dueDate);
     lines.push(
       '  try',
-      `    set dueStr to do shell script "date -j -f '%Y-%m-%dT%H:%M:%S' '${dueParsed}' '+%s'"`,
-      '    set due date of newReminder to ((dueStr as number) as date)',
+      '    set dueD to current date',
+      `    set year of dueD to ${d.getFullYear()}`,
+      `    set month of dueD to ${d.getMonth() + 1}`,
+      `    set day of dueD to ${d.getDate()}`,
+      `    set hours of dueD to ${d.getHours()}`,
+      `    set minutes of dueD to ${d.getMinutes()}`,
+      `    set seconds of dueD to ${d.getSeconds()}`,
+      '    set due date of newReminder to dueD',
       '  end try',
     );
   }
@@ -236,6 +262,77 @@ async function addReminderMacOS(
       };
     }
     return { status: 'no_display', message: `Could not add reminder: ${msg}` };
+  }
+}
+
+async function listRemindersMacOS(opts: ListRemindersOptions): Promise<ReminderSummary[]> {
+  const limit = opts.limit ?? 20;
+  const titleFilter = opts.title ? escapeAS(opts.title) : '';
+  const listFilter = opts.listName ? escapeAS(opts.listName) : '';
+  const includeCompleted = opts.includeCompleted === true;
+
+  const script = `
+set jsonResult to "["
+set resultCount to 0
+set maxResults to ${limit}
+set titleFilter to "${titleFilter}"
+set listFilter to "${listFilter}"
+set includeCompleted to ${includeCompleted}
+
+tell application "Reminders"
+  repeat with rl in lists
+    if resultCount \u2265 maxResults then exit repeat
+    set listName to name of rl
+    if listFilter is "" or listName is listFilter then
+      try
+        set rems to every reminder of rl
+        repeat with r in rems
+          if resultCount \u2265 maxResults then exit repeat
+          set isComp to completed of r
+          if includeCompleted or not isComp then
+            set rTitle to name of r
+            set matchesTitle to true
+            if titleFilter is not "" then
+              ignoring case
+                if rTitle does not contain titleFilter then set matchesTitle to false
+              end ignoring
+            end if
+            if matchesTitle then
+              set rId to id of r
+              set rDue to ""
+              try
+                set dd to due date of r
+                if dd is not missing value then
+                  set rDue to (dd as text)
+                end if
+              end try
+              set rPriority to priority of r
+              set pLabel to "none"
+              if rPriority is 1 then set pLabel to "high"
+              if rPriority is 5 then set pLabel to "medium"
+              if rPriority is 9 then set pLabel to "low"
+              set compStr to "false"
+              if isComp then set compStr to "true"
+              if resultCount > 0 then set jsonResult to jsonResult & ","
+              set jsonResult to jsonResult & "{\\"id\\":\\"" & rId & "\\",\\"title\\":\\"" & rTitle & "\\",\\"dueDate\\":\\"" & rDue & "\\",\\"completed\\":" & compStr & ",\\"priority\\":\\"" & pLabel & "\\",\\"list\\":\\"" & listName & "\\"}"
+              set resultCount to resultCount + 1
+            end if
+          end if
+        end repeat
+      end try
+    end if
+  end repeat
+end tell
+
+set jsonResult to jsonResult & "]"
+return jsonResult
+`;
+
+  try {
+    const { stdout } = await execFile('osascript', ['-e', script], { timeout: 15_000 });
+    return JSON.parse(stdout.trim()) as ReminderSummary[];
+  } catch {
+    return [];
   }
 }
 
@@ -293,5 +390,11 @@ export default class RemindersService {
     }
     const confirm = opts.confirm !== false;
     return addReminderMacOS(input, confirm);
+  }
+
+  /** List reminders matching the given filters. */
+  async listReminders(opts: ListRemindersOptions = {}): Promise<ReminderSummary[]> {
+    if (this.platform !== 'darwin') return [];
+    return listRemindersMacOS(opts);
   }
 }
