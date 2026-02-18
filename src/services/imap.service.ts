@@ -522,9 +522,12 @@ export default class ImapService {
     const mailboxes = await client.list();
     const mb = mailboxes.find((m) => m.path === mailboxPath);
     if (!mb) return; // unknown — let the server reject if invalid
-    if (mb.specialUse && ImapService.VIRTUAL_SPECIAL_USE.has(mb.specialUse)) {
+    const virtualFlag = [...ImapService.VIRTUAL_SPECIAL_USE].find(
+      (f) => mb.specialUse === f || mb.flags?.has(f),
+    );
+    if (virtualFlag) {
       throw new Error(
-        `"${mailboxPath}" is a virtual folder (${mb.specialUse}). ` +
+        `"${mailboxPath}" is a virtual folder (${virtualFlag}). ` +
           'Use find_email_folder to locate the real folder first.',
       );
     }
@@ -564,24 +567,33 @@ export default class ImapService {
     // 2. List all real mailboxes (exclude virtual and non-selectable)
     const allMailboxes = await client.list();
     const realMailboxes = allMailboxes.filter((mb) => {
-      if (mb.specialUse && ImapService.VIRTUAL_SPECIAL_USE.has(mb.specialUse)) return false;
       if (!mb.listed) return false;
+      if (mb.flags?.has('\\Noselect')) return false;
+      const isVirtual = [...ImapService.VIRTUAL_SPECIAL_USE].some(
+        (f) => mb.specialUse === f || mb.flags?.has(f),
+      );
+      if (isVirtual) return false;
       return true;
     });
 
     // 3. Search each real mailbox for the Message-ID (sequential — each needs its own lock)
     const folders: string[] = [];
     const searchMailbox = async (mbPath: string): Promise<void> => {
-      const lock = await client.getMailboxLock(mbPath);
       try {
-        const results = await client.search({ header: { 'message-id': messageId } }, { uid: true });
-        if (results && Array.isArray(results) && results.length > 0) {
-          folders.push(mbPath);
+        const lock = await client.getMailboxLock(mbPath);
+        try {
+          const results = await client.search(
+            { header: { 'message-id': messageId } },
+            { uid: true },
+          );
+          if (results && Array.isArray(results) && results.length > 0) {
+            folders.push(mbPath);
+          }
+        } finally {
+          lock.release();
         }
       } catch {
-        // Skip folders that don't support SEARCH (e.g. \Noselect)
-      } finally {
-        lock.release();
+        // Skip folders that can't be selected or searched (e.g. \Noselect, INBOX on some providers)
       }
     };
     // eslint-disable-next-line no-restricted-syntax
