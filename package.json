@@ -24,6 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
+    "test:all": "vitest run && vitest run --config vitest.config.integration.ts",
     "check": "biome check src/ && eslint src/",
     "report": "mkdir -p reports && biome check src/ --reporter=json > reports/biome.json 2>&1; eslint src/ -f json -o reports/eslint.json; actionlint -format '{{json .}}' > reports/actionlint.json 2>&1; pnpm test",
     "commit": "cog commit",
@@ -83,6 +85,7 @@
     "eslint": "^9.39.2",
     "eslint-config-airbnb-extended": "^3.0.1",
     "lefthook": "^2.1.1",
+    "testcontainers": "^11.12.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

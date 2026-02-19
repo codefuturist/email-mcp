@@ -5,6 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    exclude: ['src/__integration__/**'],
     reporters: ['default', 'junit', 'json'],
     outputFile: {
       junit: 'reports/test-results.xml',
