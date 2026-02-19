@@ -19,7 +19,7 @@ dockers_v2:
       - biome.json
     images:
       - ghcr.io/codefuturist/email-mcp
-      # - docker.io/codefuturist/email-mcp  # TODO: enable after configuring DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets
+      - docker.io/diarmid/email-mcp
     tags:
       - "{{ .Version }}"
       - "{{ .Version }}-bookworm"
@@ -63,7 +63,7 @@ dockers_v2:
       - biome.json
     images:
       - ghcr.io/codefuturist/email-mcp
-      # - docker.io/codefuturist/email-mcp  # TODO: enable after configuring DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets
+      - docker.io/diarmid/email-mcp
     tags:
       - "{{ .Version }}-alpine"
       - "{{ .Major }}.{{ .Minor }}-alpine"

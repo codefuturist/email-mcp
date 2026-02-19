@@ -35,6 +35,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Extract version from package.json
         id: version
         run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
@@ -47,7 +53,9 @@ jobs:
         id: meta-debian
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/codefuturist/email-mcp
+          images: |
+            ghcr.io/codefuturist/email-mcp
+            diarmid/email-mcp
           tags: |
             type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
             type=semver,pattern={{version}},suffix=-bookworm,value=v${{ steps.version.outputs.version }}
@@ -77,7 +85,9 @@ jobs:
         id: meta-alpine
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/codefuturist/email-mcp
+          images: |
+            ghcr.io/codefuturist/email-mcp
+            diarmid/email-mcp
           tags: |
             type=semver,pattern={{version}},suffix=-alpine,value=v${{ steps.version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},suffix=-alpine,value=v${{ steps.version.outputs.version }}
