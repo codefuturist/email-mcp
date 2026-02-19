@@ -21,9 +21,10 @@ describe('Connection Modes', () => {
 
   describe('Plain (no encryption)', () => {
     let services: TestServices;
+    const account = buildTestAccount({ name: 'integration-plain' });
 
     beforeAll(async () => {
-      services = createTestServices(buildTestAccount());
+      services = createTestServices(account);
       await seedEmail({ subject: 'Plain mode test' });
       await waitForDelivery();
     });
@@ -32,13 +33,20 @@ describe('Connection Modes', () => {
       await services.connections.closeAll();
     });
 
-    it('should connect and list mailboxes', async () => {
-      const mailboxes = await services.imapService.listMailboxes('integration');
+    it('should connect via IMAP without encryption', async () => {
+      const mailboxes = await services.imapService.listMailboxes(account.name);
       expect(mailboxes.find((m) => m.path === 'INBOX')).toBeDefined();
     });
 
-    it('should send and receive email', async () => {
-      const result = await services.smtpService.sendEmail('integration', {
+    it('should list emails via IMAP without encryption', async () => {
+      const list = await services.imapService.listEmails(account.name, {
+        subject: 'Plain mode test',
+      });
+      expect(list.items.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should send email via SMTP without encryption', async () => {
+      const result = await services.smtpService.sendEmail(account.name, {
         to: ['bob@localhost'],
         subject: 'Plain send test',
         body: 'Sent over plain connection',
@@ -46,11 +54,21 @@ describe('Connection Modes', () => {
       expect(result.messageId).toBeTruthy();
     });
 
-    it('should list emails in INBOX', async () => {
-      const list = await services.imapService.listEmails('integration', {
-        subject: 'Plain mode test',
-      });
-      expect(list.items.length).toBeGreaterThanOrEqual(1);
+    it('should fetch full email content without encryption', async () => {
+      const list = await services.imapService.listEmails(account.name, { pageSize: 1 });
+      if (list.items.length > 0) {
+        const email = await services.imapService.getEmail(account.name, list.items[0].id);
+        expect(email.subject).toBeTruthy();
+      }
+    });
+
+    it('should set flags without encryption', async () => {
+      const list = await services.imapService.listEmails(account.name, { pageSize: 1 });
+      if (list.items.length > 0) {
+        await services.imapService.setFlags(account.name, list.items[0].id, 'INBOX', 'read');
+        const flags = await services.imapService.getEmailFlags(account.name, list.items[0].id);
+        expect(flags.seen).toBe(true);
+      }
     });
   });
 
