@@ -31,6 +31,10 @@ const typescriptConfig = defineConfig([
 
 export default defineConfig([
   includeIgnoreFile(gitignorePath),
+  {
+    name: "integration-tests/ignore",
+    ignores: ["src/__integration__/**"],
+  },
   ...jsConfig,
   ...nodeConfig,
   ...typescriptConfig,
