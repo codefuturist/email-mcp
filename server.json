@@ -28,7 +28,7 @@
         "-i",
         "-v",
         "~/.config/email-mcp:/home/node/.config/email-mcp:ro",
-        "codefuturist/email-mcp"
+        "ghcr.io/codefuturist/email-mcp"
       ],
       "transport": {
         "type": "stdio"

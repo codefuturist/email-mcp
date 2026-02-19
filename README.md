@@ -79,11 +79,14 @@ pnpm add -g @codefuturist/email-mcp
 No Node.js required — just Docker.
 
 ```bash
-# Build from source
-docker build -t codefuturist/email-mcp .
+# Pull from GitHub Container Registry
+docker pull ghcr.io/codefuturist/email-mcp
 
-# Or use Docker Compose
-docker compose build
+# Or from Docker Hub
+docker pull codefuturist/email-mcp
+
+# Or build from source
+docker build -t codefuturist/email-mcp .
 ```
 
 > **Note:** The server uses stdio transport. Config must be created on the host first
@@ -200,7 +203,7 @@ Run the server in a container — mount your config directory read-only:
 ```bash
 docker run --rm -i \
   -v ~/.config/email-mcp:/home/node/.config/email-mcp:ro \
-  codefuturist/email-mcp
+  ghcr.io/codefuturist/email-mcp
 ```
 
 For MCP client configuration (e.g. Claude Desktop):
@@ -213,7 +216,7 @@ For MCP client configuration (e.g. Claude Desktop):
       "args": [
         "run", "--rm", "-i",
         "-v", "~/.config/email-mcp:/home/node/.config/email-mcp:ro",
-        "codefuturist/email-mcp"
+        "ghcr.io/codefuturist/email-mcp"
       ]
     }
   }

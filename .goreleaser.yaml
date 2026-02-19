@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+# No Go builds — this is a Node.js/TypeScript project.
+# The Dockerfile handles the full build pipeline (pnpm install → tsc → prune).
+builds: []
+
+dockers_v2:
+  - id: email-mcp
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/codefuturist/email-mcp
+      - docker.io/codefuturist/email-mcp
+    tags:
+      - "v{{ .Version }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: email-mcp
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.url: "https://github.com/codefuturist/email-mcp"
+      org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.licenses: LGPL-3.0-or-later
+      org.opencontainers.image.vendor: codefuturist
+
+# GitHub Release + npm publish handled by existing release.yml steps
+release:
+  disable: true
