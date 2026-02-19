@@ -7,7 +7,8 @@ builds:
   - skip: true
 
 dockers_v2:
-  - id: email-mcp
+  # ── Debian (slim) — default image ────────────────────────────────────────────
+  - id: email-mcp-debian
     dockerfile: Dockerfile
     extra_files:
       - src/
@@ -20,9 +21,17 @@ dockers_v2:
       - ghcr.io/codefuturist/email-mcp
       # - docker.io/codefuturist/email-mcp  # TODO: enable after configuring DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets
     tags:
-      - "v{{ .Version }}"
+      - "{{ .Version }}"
+      - "{{ .Version }}-bookworm"
       - "{{ .Major }}.{{ .Minor }}"
-      - latest
+      - "{{ .Major }}.{{ .Minor }}-bookworm"
+      - "{{ .Major }}"
+      - "{{ .Major }}-bookworm"
+      - bookworm
+      - "{{ if not .Prerelease }}latest{{ end }}"
+      - "sha-{{ .ShortCommit }}"
+      - "ts-{{ .Now.Unix }}"
+      - "{{ .Now.Unix }}"
     platforms:
       - linux/amd64
       - linux/arm64
@@ -42,6 +51,56 @@ dockers_v2:
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.created: "{{ .Date }}"
 
-# GitHub Release + npm publish handled by existing release.yml steps
+  # ── Alpine — minimal image ────────────────────────────────────────────────────
+  - id: email-mcp-alpine
+    dockerfile: Dockerfile.alpine
+    extra_files:
+      - src/
+      - package.json
+      - pnpm-lock.yaml
+      - tsconfig.build.json
+      - tsconfig.json
+      - biome.json
+    images:
+      - ghcr.io/codefuturist/email-mcp
+      # - docker.io/codefuturist/email-mcp  # TODO: enable after configuring DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets
+    tags:
+      - "{{ .Version }}-alpine"
+      - "{{ .Major }}.{{ .Minor }}-alpine"
+      - "{{ .Major }}-alpine"
+      - "{{ if not .Prerelease }}alpine{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: email-mcp
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.url: "https://github.com/codefuturist/email-mcp"
+      org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.licenses: LGPL-3.0-or-later
+      org.opencontainers.image.vendor: codefuturist
+    annotations:
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
+      org.opencontainers.image.licenses: LGPL-3.0-or-later
+      org.opencontainers.image.created: "{{ .Date }}"
+
+# GitHub Release notes — npm publish and MCP registry handled by release.yml
 release:
-  disable: true
+  github:
+    owner: codefuturist
+    name: email-mcp
+  make_latest: true
+  draft: false
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge"
+      - "^chore(deps)"
+      - "^ci:"

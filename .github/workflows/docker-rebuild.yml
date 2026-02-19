@@ -39,20 +39,59 @@ jobs:
         id: version
         run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
+      - name: Compute build timestamp
+        id: ts
+        run: echo "unix=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Docker meta (Debian)
+        id: meta-debian
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/codefuturist/email-mcp
+          tags: |
+            type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{version}},suffix=-bookworm,value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},suffix=-bookworm,value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},suffix=-bookworm,value=v${{ steps.version.outputs.version }}
+            type=raw,value=bookworm
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ !contains(steps.version.outputs.version, '-') }}
+            type=raw,value=ts-${{ steps.ts.outputs.unix }}
+            type=raw,value=${{ steps.ts.outputs.unix }}
+
+      - name: Build and push (Debian)
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta-debian.outputs.tags }}
+          labels: ${{ steps.meta-debian.outputs.labels }}
+          cache-from: type=gha,scope=debian
+          cache-to: type=gha,mode=max,scope=debian
+
+      - name: Docker meta (Alpine)
+        id: meta-alpine
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/codefuturist/email-mcp
           tags: |
-            ghcr.io/codefuturist/email-mcp:latest
-            ghcr.io/codefuturist/email-mcp:${{ steps.version.outputs.version }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/codefuturist/email-mcp
-            org.opencontainers.image.description=IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage
-            org.opencontainers.image.licenses=LGPL-3.0-or-later
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            type=semver,pattern={{version}},suffix=-alpine,value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},suffix=-alpine,value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},suffix=-alpine,value=v${{ steps.version.outputs.version }}
+            type=raw,value=alpine,enable=${{ !contains(steps.version.outputs.version, '-') }}
+
+      - name: Build and push (Alpine)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.alpine
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta-alpine.outputs.tags }}
+          labels: ${{ steps.meta-alpine.outputs.labels }}
+          cache-from: type=gha,scope=alpine
+          cache-to: type=gha,mode=max,scope=alpine

@@ -79,15 +79,26 @@ pnpm add -g @codefuturist/email-mcp
 No Node.js required — just Docker.
 
 ```bash
-# Pull from GitHub Container Registry
-docker pull ghcr.io/codefuturist/email-mcp
+# Latest stable release
+docker pull ghcr.io/codefuturist/email-mcp:latest
 
-# Or from Docker Hub
-docker pull codefuturist/email-mcp
+# Pin to an exact version (immutable)
+docker pull ghcr.io/codefuturist/email-mcp:0.2.3
+
+# Auto-update patches within a minor version
+docker pull ghcr.io/codefuturist/email-mcp:0.2
+
+# Track a major version (won't cross breaking-change boundary)
+docker pull ghcr.io/codefuturist/email-mcp:0
+
+# Pin to an exact git commit (immutable, CI traceability)
+docker pull ghcr.io/codefuturist/email-mcp:sha-abc1234
 
 # Or build from source
-docker build -t codefuturist/email-mcp .
+docker build -t ghcr.io/codefuturist/email-mcp .
 ```
+
+> **Tag convention:** Tags follow bare semver (no `v` prefix), matching Docker ecosystem standards (e.g. `node:24`, `nginx:1.25`). The `latest` tag is only updated on stable releases, never pre-releases.
 
 > **Note:** The server uses stdio transport. Config must be created on the host first
 > (via `npx @codefuturist/email-mcp setup` or manually) and mounted into the container.

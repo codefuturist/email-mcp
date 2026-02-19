@@ -1,0 +1,46 @@
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM node:24-alpine AS builder
+
+WORKDIR /app
+
+# Enable pnpm via corepack
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+# Install dependencies (layer cached unless lock changes)
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# Build TypeScript
+COPY tsconfig.json tsconfig.build.json ./
+COPY src/ src/
+RUN pnpm build
+
+# Remove dev dependencies
+RUN pnpm prune --prod
+
+# ── Production stage ──────────────────────────────────────────────────────────
+FROM node:24-alpine AS production
+
+LABEL org.opencontainers.image.title="email-mcp" \
+      org.opencontainers.image.description="IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage" \
+      org.opencontainers.image.url="https://github.com/codefuturist/email-mcp" \
+      org.opencontainers.image.source="https://github.com/codefuturist/email-mcp" \
+      org.opencontainers.image.licenses="LGPL-3.0-or-later" \
+      org.opencontainers.image.vendor="codefuturist"
+
+WORKDIR /app
+
+# Copy only production artifacts
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+# Create config directory for volume mount
+RUN mkdir -p /home/node/.config/email-mcp && chown -R node:node /home/node/.config
+
+ENV NODE_ENV=production
+
+USER node
+
+ENTRYPOINT ["node", "dist/main.js"]
+CMD ["stdio"]
