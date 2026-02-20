@@ -157,7 +157,12 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 <details>
 <summary><strong>VS Code (GitHub Copilot)</strong></summary>
 
-Add to `.vscode/mcp.json` in your workspace, or User `settings.json` under the `mcp` key:
+**Option 1 — Extensions gallery (easiest):**
+1. Open the Extensions view (<kbd>⇧⌘X</kbd> / <kbd>Ctrl+Shift+X</kbd>)
+2. Search `@mcp email-mcp`
+3. Click **Install** (user-wide) or right-click → **Install in Workspace**
+
+**Option 2 — Workspace config** (`.vscode/mcp.json`, committed to source control):
 
 ```json
 {
@@ -166,6 +171,24 @@ Add to `.vscode/mcp.json` in your workspace, or User `settings.json` under the `
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "@codefuturist/email-mcp", "stdio"]
+    }
+  }
+}
+```
+
+**Option 3 — User config** (`settings.json`, applies to all workspaces):
+
+Open the Command Palette → **Preferences: Open User Settings (JSON)** and add:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "email": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@codefuturist/email-mcp", "stdio"]
+      }
     }
   }
 }
@@ -200,6 +223,25 @@ Edit `~/.codeium/windsurf/mcp_config.json`:
     "email": {
       "command": "npx",
       "args": ["-y", "@codefuturist/email-mcp", "stdio"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>Zed</strong></summary>
+
+Edit `~/.config/zed/settings.json`:
+
+```json
+{
+  "context_servers": {
+    "email": {
+      "command": {
+        "path": "npx",
+        "args": ["-y", "@codefuturist/email-mcp", "stdio"]
+      }
     }
   }
 }
