@@ -11,10 +11,15 @@ on:
           Version to release (e.g. 1.2.3) — used when
           triggering manually without a git tag
         required: false
+      skip-npm:
+        description: Skip npm publish (e.g. already published)
+        type: boolean
+        default: false
 
 jobs:
   npm:
     name: Publish to npm
+    if: ${{ !inputs.skip-npm }}
     uses: codefuturist/shared-workflows/.github/workflows/release-npm.yml@v1
     permissions:
       contents: read
@@ -28,6 +33,7 @@ jobs:
     name: Publish to MCP Registry
     runs-on: ubuntu-latest
     needs: [npm]
+    if: always() && (needs.npm.result == 'success' || needs.npm.result == 'skipped')
 
     permissions:
       contents: read
@@ -69,6 +75,7 @@ jobs:
     name: Publish Docker Images
     runs-on: ubuntu-latest
     needs: [npm, mcp]
+    if: always() && (needs.npm.result == 'success' || needs.npm.result == 'skipped') && needs.mcp.result == 'success'
 
     permissions:
       contents: write
