@@ -1,4 +1,4 @@
-import { _resetForTesting, bindServer, markInitialized, mcpLog } from './logging.js';
+import { __resetForTesting, bindServer, markInitialized, mcpLog } from './logging.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -18,7 +18,7 @@ function createMockServer(connected = true) {
 
 describe('mcpLog', () => {
   beforeEach(() => {
-    _resetForTesting();
+    __resetForTesting();
   });
 
   it('drops messages when no server is bound', async () => {

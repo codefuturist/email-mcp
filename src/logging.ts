@@ -54,7 +54,8 @@ export function markInitialized(): void {
  * Reset module state.  **Test-only** — never call in production.
  * @internal
  */
-export function _resetForTesting(): void {
+// eslint-disable-next-line @typescript-eslint/naming-convention, no-underscore-dangle
+export function __resetForTesting(): void {
   mcpServerRef = null;
   initialized = false;
 }

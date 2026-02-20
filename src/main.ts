@@ -124,6 +124,7 @@ async function runServer(): Promise<void> {
   lowLevelServer.oninitialized = () => {
     markInitialized();
 
+    // eslint-disable-next-line no-void
     void (async () => {
       try {
         const clientCaps = lowLevelServer.getClientCapabilities?.() ?? {};
