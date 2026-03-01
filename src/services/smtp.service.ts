@@ -36,14 +36,34 @@ export default class SmtpService {
     const account = this.connections.getAccount(accountName);
     const transport = await this.connections.getSmtpTransport(accountName);
 
+    const fromAddress = account.fullName
+      ? `"${account.fullName}" <${account.email}>`
+      : account.email;
+
     const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: fromAddress,
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       bcc: options.bcc?.join(', '),
       subject: options.subject,
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
+
+    // Append to Sent folder
+    try {
+      await this.imapService.saveToSent(accountName, {
+        from: fromAddress,
+        to: options.to,
+        subject: options.subject,
+        body: options.body,
+        messageId: result.messageId,
+        cc: options.cc,
+        bcc: options.bcc,
+        html: options.html,
+      });
+    } catch {
+      // Don't fail the send if Sent folder append fails
+    }
 
     return {
       messageId: result.messageId ?? '',
@@ -97,9 +117,12 @@ export default class SmtpService {
       : `Re: ${original.subject}`;
 
     const transport = await this.connections.getSmtpTransport(accountName);
+    const fromAddress = account.fullName
+      ? `"${account.fullName}" <${account.email}>`
+      : account.email;
 
     const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: fromAddress,
       to: to.join(', '),
       cc: cc.length > 0 ? cc.join(', ') : undefined,
       subject,
@@ -107,6 +130,23 @@ export default class SmtpService {
       references: references.join(' '),
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
+
+    // Append to Sent folder
+    try {
+      await this.imapService.saveToSent(accountName, {
+        from: fromAddress,
+        to,
+        subject,
+        body: options.body,
+        messageId: result.messageId,
+        cc: cc.length > 0 ? cc : undefined,
+        html: options.html,
+        inReplyTo: original.messageId,
+        references: references.join(' '),
+      });
+    } catch {
+      // Don't fail the send if Sent folder append fails
+    }
 
     return {
       messageId: result.messageId ?? '',
@@ -152,14 +192,31 @@ export default class SmtpService {
     const fullBody = (options.body ?? '') + forwardHeader + originalBody;
 
     const transport = await this.connections.getSmtpTransport(accountName);
+    const fromAddress = account.fullName
+      ? `"${account.fullName}" <${account.email}>`
+      : account.email;
 
     const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: fromAddress,
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       subject,
       text: fullBody,
     });
+
+    // Append to Sent folder
+    try {
+      await this.imapService.saveToSent(accountName, {
+        from: fromAddress,
+        to: options.to,
+        subject,
+        body: fullBody,
+        messageId: result.messageId,
+        cc: options.cc,
+      });
+    } catch {
+      // Don't fail the send if Sent folder append fails
+    }
 
     return {
       messageId: result.messageId ?? '',
@@ -196,19 +253,43 @@ export default class SmtpService {
 
     const account = this.connections.getAccount(accountName);
     const transport = await this.connections.getSmtpTransport(accountName);
+    const fromAddress = account.fullName
+      ? `"${account.fullName}" <${account.email}>`
+      : account.email;
 
-    const to = draft.to.map((a) => a.address).join(', ');
-    const cc = draft.cc?.map((a) => a.address).join(', ');
+    const toAddrs = draft.to.map((a) => a.address);
+    const ccAddrs = draft.cc?.map((a) => a.address);
+    const to = toAddrs.join(', ');
+    const cc = ccAddrs?.join(', ');
+    const bodyContent = draft.bodyText ?? draft.bodyHtml ?? '';
+    const isHtml = !draft.bodyText && !!draft.bodyHtml;
 
     const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: fromAddress,
       to,
       cc,
       subject: draft.subject,
       inReplyTo: draft.inReplyTo,
       references: draft.references?.join(' '),
-      ...(draft.bodyHtml ? { html: draft.bodyHtml } : { text: draft.bodyText ?? '' }),
+      ...(isHtml ? { html: bodyContent } : { text: bodyContent }),
     });
+
+    // Append to Sent folder
+    try {
+      await this.imapService.saveToSent(accountName, {
+        from: fromAddress,
+        to: toAddrs,
+        subject: draft.subject,
+        body: bodyContent,
+        messageId: result.messageId,
+        cc: ccAddrs,
+        html: isHtml,
+        inReplyTo: draft.inReplyTo,
+        references: draft.references?.join(' '),
+      });
+    } catch {
+      // Don't fail the send if Sent folder append fails
+    }
 
     // Delete the draft after successful send
     await this.imapService.deleteDraft(accountName, draftId, draftsPath);

@@ -53,8 +53,8 @@ export const AccountConfigSchema = z
     imap: ImapConfigSchema,
     smtp: SmtpConfigSchema,
   })
-  .refine((data) => data.password ?? data.oauth2, {
-    message: 'Either password or oauth2 config is required',
+  .refine((data) => Boolean(data.password) || data.oauth2 != null, {
+    message: 'Either password (or "keychain" on macOS) or oauth2 config is required',
   });
 
 export const WatcherConfigSchema = z.object({

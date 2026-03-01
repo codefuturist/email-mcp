@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
 import type { AccountConfig, AppConfig, HookRule, OAuth2Config } from '../types/index.js';
+import { getPassword, isKeychainAvailable } from './keychain.js';
 import type { RawAccountConfig, RawAppConfig } from './schema.js';
 import { AppConfigFileSchema } from './schema.js';
 import { CONFIG_FILE, xdg } from './xdg.js';
@@ -242,6 +243,34 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Keychain resolution: replace password = "keychain" with real credentials
+// ---------------------------------------------------------------------------
+
+async function resolveKeychainPasswords(config: AppConfig): Promise<AppConfig> {
+  if (!isKeychainAvailable()) return config;
+
+  const resolved = await Promise.all(
+    config.accounts.map(async (account) => {
+      if (account.password === 'keychain' || account.password === undefined) {
+        const secret = await getPassword(account.email);
+        if (secret) {
+          return { ...account, password: secret };
+        }
+        if (account.password === 'keychain') {
+          throw new Error(
+            `Keychain entry not found for "${account.email}". ` +
+              `Store it with: email-mcp keychain set ${account.email}`,
+          );
+        }
+      }
+      return account;
+    }),
+  );
+
+  return { ...config, accounts: resolved };
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -268,14 +297,14 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
   const envConfig = loadFromEnv();
   if (envConfig) {
     const validated = AppConfigFileSchema.parse(envConfig);
-    return normalizeConfig(validated);
+    return resolveKeychainPasswords(normalizeConfig(validated));
   }
 
   // 2. Fall back to TOML config file
   const fileConfig = await loadFromFile(configPath);
   if (fileConfig) {
     const validated = AppConfigFileSchema.parse(fileConfig);
-    return normalizeConfig(validated);
+    return resolveKeychainPasswords(normalizeConfig(validated));
   }
 
   throw new Error(
@@ -294,9 +323,9 @@ export async function saveConfig(
   filePath: string = CONFIG_FILE,
 ): Promise<void> {
   const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const toml = stringifyTOML(config as Record<string, unknown>);
-  await fs.writeFile(filePath, toml, 'utf-8');
+  await fs.writeFile(filePath, toml, { encoding: 'utf-8', mode: 0o600 });
 }
 
 /**
@@ -348,7 +377,7 @@ email = "you@example.com"
 full_name = "Your Name"
 # username defaults to email if omitted
 # username = "you@example.com"
-password = "your-app-password"
+password = "keychain"  # macOS: reads from Keychain. Otherwise use app-specific password.
 
 [accounts.imap]
 host = "imap.example.com"
