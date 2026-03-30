@@ -103,6 +103,10 @@ docker build -t ghcr.io/codefuturist/email-mcp .
 > **Note:** The server uses stdio transport. Config must be created on the host first
 > (via `npx @codefuturist/email-mcp setup` or manually) and mounted into the container.
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/codefuturist-email-mcp).
+
 ## Usage
 
 ### Setup
