@@ -46,6 +46,16 @@ function loadFromEnv(): RawAppConfig | null {
     settings: {
       rate_limit: parseInt(process.env.MCP_EMAIL_RATE_LIMIT ?? '10', 10),
       read_only: process.env.MCP_EMAIL_READ_ONLY === 'true',
+      send_policy: {
+        allowed_domains: (process.env.MCP_EMAIL_ALLOWED_DOMAINS ?? '')
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean),
+        blocked_domains: (process.env.MCP_EMAIL_BLOCKED_DOMAINS ?? '')
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean),
+      },
       watcher: {
         enabled: process.env.MCP_EMAIL_WATCHER_ENABLED === 'true',
         folders: (process.env.MCP_EMAIL_WATCHER_FOLDERS ?? 'INBOX')
@@ -159,6 +169,7 @@ function normalizeAccount(raw: RawAccountConfig): AccountConfig {
     fullName: raw.full_name,
     username: raw.username ?? raw.email,
     password: raw.password,
+    credentialSource: raw.credential_source,
     oauth2: raw.oauth2 ? normalizeOAuth2(raw.oauth2) : undefined,
     imap: {
       host: raw.imap.host,
@@ -205,11 +216,19 @@ function normalizeHookRule(raw: {
   };
 }
 
+function normalizeDomainList(domains?: string[]): string[] {
+  return (domains ?? []).map((d) => d.toLowerCase());
+}
+
 function normalizeConfig(raw: RawAppConfig): AppConfig {
   return {
     settings: {
       rateLimit: raw.settings.rate_limit,
       readOnly: raw.settings.read_only,
+      sendPolicy: {
+        allowedDomains: normalizeDomainList(raw.settings.send_policy?.allowed_domains),
+        blockedDomains: normalizeDomainList(raw.settings.send_policy?.blocked_domains),
+      },
       watcher: {
         enabled: raw.settings.watcher.enabled,
         folders: raw.settings.watcher.folders,
@@ -288,15 +307,17 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
 
 /**
  * Save configuration to a TOML file.
+ * Sets file permissions to 0o600 (owner read/write only) since config may
+ * contain plaintext passwords or OAuth secrets.
  */
 export async function saveConfig(
   config: RawAppConfig,
   filePath: string = CONFIG_FILE,
 ): Promise<void> {
   const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const toml = stringifyTOML(config as Record<string, unknown>);
-  await fs.writeFile(filePath, toml, 'utf-8');
+  await fs.writeFile(filePath, toml, { encoding: 'utf-8', mode: 0o600 });
 }
 
 /**

@@ -499,6 +499,7 @@ async function addAccount(): Promise<void> {
         settings: {
           rate_limit: 10,
           read_only: false,
+          send_policy: { allowed_domains: [], blocked_domains: [] },
           watcher: {
             enabled: false,
             folders: ['INBOX'],

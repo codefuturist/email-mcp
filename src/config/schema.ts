@@ -49,12 +49,13 @@ export const AccountConfigSchema = z
     full_name: z.string().optional(),
     username: z.string().optional(),
     password: z.string().optional(),
+    credential_source: z.string().optional(),
     oauth2: OAuth2ConfigSchema.optional(),
     imap: ImapConfigSchema,
     smtp: SmtpConfigSchema,
   })
-  .refine((data) => data.password ?? data.oauth2, {
-    message: 'Either password or oauth2 config is required',
+  .refine((data) => data.password ?? data.credential_source ?? data.oauth2, {
+    message: 'Either password, credential_source, or oauth2 config is required',
   });
 
 export const WatcherConfigSchema = z.object({
@@ -115,9 +116,15 @@ export const HooksConfigSchema = z.object({
   calendar_confirm: z.boolean().default(true),
 });
 
+export const SendPolicySchema = z.object({
+  allowed_domains: z.array(z.string().min(1)).default([]),
+  blocked_domains: z.array(z.string().min(1)).default([]),
+});
+
 export const SettingsSchema = z.object({
   rate_limit: z.number().int().min(1).default(10),
   read_only: z.boolean().default(false),
+  send_policy: SendPolicySchema.default({ allowed_domains: [], blocked_domains: [] }),
   watcher: WatcherConfigSchema.default({
     enabled: false,
     folders: ['INBOX'],
@@ -148,6 +155,7 @@ export const AppConfigFileSchema = z.object({
   settings: SettingsSchema.default({
     rate_limit: 10,
     read_only: false,
+    send_policy: { allowed_domains: [], blocked_domains: [] },
     watcher: {
       enabled: false,
       folders: ['INBOX'],

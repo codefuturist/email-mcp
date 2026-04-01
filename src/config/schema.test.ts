@@ -86,9 +86,9 @@ describe('AccountConfigSchema', () => {
     expect(result.oauth2?.provider).toBe('google');
   });
 
-  it('rejects when neither password nor oauth2 provided', () => {
+  it('rejects when neither password, credential_source, nor oauth2 provided', () => {
     expect(() => AccountConfigSchema.parse(validAccount({ password: undefined }))).toThrow(
-      'password or oauth2',
+      'password, credential_source, or oauth2',
     );
   });
 

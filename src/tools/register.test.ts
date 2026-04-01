@@ -41,6 +41,7 @@ function createConfig(readOnly: boolean): AppConfig {
     settings: {
       rateLimit: 10,
       readOnly,
+      sendPolicy: { allowedDomains: [], blockedDomains: [] },
       watcher: { enabled: false, folders: ['INBOX'], idleTimeout: 1740 },
       hooks: {
         onNewEmail: 'notify',

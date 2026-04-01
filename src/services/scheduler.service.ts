@@ -7,12 +7,55 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { SCHEDULED_DIR, SCHEDULED_SENT_DIR } from '../config/xdg.js';
 import type { ScheduledEmail } from '../types/index.js';
 import type ImapService from './imap.service.js';
 import type SmtpService from './smtp.service.js';
+
+// ---------------------------------------------------------------------------
+// HMAC integrity — prevent unauthorized file injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a stable HMAC key from machine-specific entropy.
+ * This is NOT a secret key management system — it's a tamper-detection
+ * mechanism to prevent trivial file injection by other local processes.
+ */
+function getHmacKey(): string {
+  const machineId = `${os.hostname()}:${os.homedir()}:email-mcp-scheduler`;
+  return crypto.createHash('sha256').update(machineId).digest('hex');
+}
+
+interface SignedScheduledEmail extends ScheduledEmail {
+  hmacSignature?: string;
+}
+
+function computeHmac(data: ScheduledEmail): string {
+  const key = getHmacKey();
+  const payload = JSON.stringify({
+    id: data.id,
+    account: data.account,
+    to: data.to,
+    subject: data.subject,
+    sendAt: data.sendAt,
+    createdAt: data.createdAt,
+  });
+  return crypto.createHmac('sha256', key).update(payload).digest('hex');
+}
+
+function verifyHmac(data: SignedScheduledEmail): boolean {
+  if (!data.hmacSignature) return false;
+  const expected = computeHmac(data);
+  return crypto.timingSafeEqual(
+    Buffer.from(data.hmacSignature, 'hex'),
+    Buffer.from(expected, 'hex'),
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 /** Max age (ms) for "sending" status before resetting to "pending" */
 const STALE_LOCK_MS = 5 * 60 * 1000;
@@ -196,7 +239,16 @@ export default class SchedulerService {
 
       try {
         const content = await fs.readFile(filePath, 'utf-8');
-        const scheduled = JSON.parse(content) as ScheduledEmail;
+        const scheduled = JSON.parse(content) as SignedScheduledEmail;
+
+        // Verify HMAC integrity — reject tampered or externally injected files
+        if (!verifyHmac(scheduled)) {
+          result.errors.push(
+            `${file}: HMAC verification failed — file may have been tampered with`,
+          );
+          result.failed += 1;
+          continue;
+        }
 
         // Reset stale locks
         if (scheduled.status === 'sending' && scheduled.lastError !== undefined) {
@@ -297,7 +349,8 @@ export default class SchedulerService {
   private static async writeScheduledFile(scheduled: ScheduledEmail): Promise<void> {
     await SchedulerService.ensureDirs();
     const filePath = path.join(SCHEDULED_DIR, `${scheduled.id}.json`);
-    await fs.writeFile(filePath, JSON.stringify(scheduled, null, 2));
+    const signed: SignedScheduledEmail = { ...scheduled, hmacSignature: computeHmac(scheduled) };
+    await fs.writeFile(filePath, JSON.stringify(signed, null, 2));
   }
 
   private static async readDir(dirPath: string): Promise<ScheduledEmail[]> {

@@ -12,6 +12,7 @@ import type { Transporter } from 'nodemailer';
 import nodemailer from 'nodemailer';
 import { mcpLog } from '../logging.js';
 
+import { resolveCredential } from '../services/credential.service.js';
 import type OAuthService from '../services/oauth.service.js';
 import type { AccountConfig } from '../types/index.js';
 import type { IConnectionManager } from './types.js';
@@ -82,7 +83,20 @@ export default class ConnectionManager implements IConnectionManager {
       const accessToken = await this.oauthService.getAccessToken(account.oauth2);
       auth = { user: account.username, accessToken };
     } else {
-      auth = { user: account.username, pass: account.password };
+      const { password, source } = await resolveCredential(
+        accountName,
+        account.credentialSource,
+        account.password,
+      );
+      if (source === 'plaintext') {
+        await mcpLog(
+          'warning',
+          'credentials',
+          `Account "${accountName}" uses plaintext password. ` +
+            `Consider using credential_source = "keychain" for better security.`,
+        );
+      }
+      auth = { user: account.username, pass: password };
     }
 
     const client = new ImapFlow({
@@ -171,7 +185,12 @@ export default class ConnectionManager implements IConnectionManager {
       const accessToken = await this.oauthService.getAccessToken(account.oauth2);
       auth = { type: 'OAuth2', user: account.username, accessToken };
     } else {
-      auth = { user: account.username, pass: account.password };
+      const { password } = await resolveCredential(
+        accountName,
+        account.credentialSource,
+        account.password,
+      );
+      auth = { user: account.username, pass: password };
     }
 
     const transport = nodemailer.createTransport(

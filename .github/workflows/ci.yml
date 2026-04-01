@@ -13,10 +13,25 @@ concurrency:
 
 jobs:
   ci:
-    uses: codefuturist/shared-workflows/.github/workflows/ci-node.yml@v1
+    uses: codefuturist/shared-workflows/.github/workflows/ci-node.yml@b2d5cf9922522d574e8ee1116b6de1e6b7ade6d7 # v1
     with:
       node-version: "24"
       run-integration: true
       integration-artifact-pattern: "reports/integration-*"
       docker-smoke-test: true
       docker-image: "codefuturist/email-mcp:ci"
+
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high

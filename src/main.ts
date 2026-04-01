@@ -77,13 +77,18 @@ async function runServer(): Promise<void> {
   const connections = new ConnectionManager(config.accounts, oauthService);
   const rateLimiter = new RateLimiter(config.settings.rateLimit);
   const imapService = new ImapService(connections);
-  const smtpService = new SmtpService(connections, rateLimiter, imapService);
+  const smtpService = new SmtpService(
+    connections,
+    rateLimiter,
+    imapService,
+    config.settings.sendPolicy,
+  );
   const templateService = new TemplateService();
   const calendarService = new CalendarService();
   const localCalendarService = new LocalCalendarService();
   const remindersService = new RemindersService();
   const schedulerService = new SchedulerService(smtpService, imapService);
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
+  const watcherService = new WatcherService(config.settings.watcher, config.accounts, oauthService);
   const hooksService = new HooksService(config.settings.hooks, imapService);
 
   const server = createServer();

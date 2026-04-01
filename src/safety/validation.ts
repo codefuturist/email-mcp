@@ -53,15 +53,33 @@ export function validateWebhookUrl(url: string): void {
 
   // new URL('https://[::1]') stores hostname as '[::1]'
   const bare = hostname.replace(/^\[|\]$/g, '');
-  if (bare === 'localhost' || bare === '::1' || bare === '0.0.0.0') {
+
+  // Block loopback and special addresses
+  const blockedHostnames = ['localhost', '::1', '0.0.0.0', '[::]'];
+  if (blockedHostnames.includes(bare)) {
     throw new Error(`Webhook URL must not point to a loopback or private address: ${bare}`);
+  }
+
+  // Block IPv6 private/reserved prefixes
+  const ipv6BlockedPrefixes = ['fc', 'fd', 'fe80', 'ff', '::ffff:'];
+  if (ipv6BlockedPrefixes.some((prefix) => bare.startsWith(prefix))) {
+    throw new Error(`Webhook URL must not point to a private or reserved IPv6 address: ${bare}`);
   }
 
   const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(bare);
   if (ipv4Match) {
     const [, a, b] = ipv4Match.map(Number);
+    // RFC1918 private ranges
     if (a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
       throw new Error(`Webhook URL must not point to a loopback or private address: ${bare}`);
+    }
+    // Cloud metadata endpoints (AWS, GCP, Azure IMDS)
+    if (a === 169 && b === 254) {
+      throw new Error(`Webhook URL must not point to a cloud metadata endpoint: ${bare}`);
+    }
+    // CGNAT range (100.64.0.0/10) — sometimes used for internal services
+    if (a === 100 && b >= 64 && b <= 127) {
+      throw new Error(`Webhook URL must not point to a CGNAT/internal address: ${bare}`);
     }
   }
 }
@@ -106,6 +124,40 @@ export function validateLabelName(name: string): string {
   }
   /* eslint-enable no-control-regex */
   return trimmed;
+}
+
+/**
+ * Validate a recipient email address against send policy domain rules.
+ * If allowedDomains is non-empty, the recipient domain must be in the list.
+ * If blockedDomains is non-empty, the recipient domain must NOT be in the list.
+ * @param email - The recipient email address.
+ * @param allowedDomains - Allowed domains (empty = allow all).
+ * @param blockedDomains - Blocked domains (empty = block none).
+ */
+export function validateRecipientDomain(
+  email: string,
+  allowedDomains: string[],
+  blockedDomains: string[],
+): void {
+  const atIndex = email.lastIndexOf('@');
+  if (atIndex === -1) {
+    throw new Error(`Invalid email address (no domain): ${email}`);
+  }
+  const domain = email.slice(atIndex + 1).toLowerCase();
+
+  if (blockedDomains.length > 0 && blockedDomains.includes(domain)) {
+    throw new Error(
+      `Recipient domain "${domain}" is blocked by send policy. ` +
+        `Blocked domains: ${blockedDomains.join(', ')}`,
+    );
+  }
+
+  if (allowedDomains.length > 0 && !allowedDomains.includes(domain)) {
+    throw new Error(
+      `Recipient domain "${domain}" is not in the allowed domains list. ` +
+        `Allowed domains: ${allowedDomains.join(', ')}`,
+    );
+  }
 }
 
 /**

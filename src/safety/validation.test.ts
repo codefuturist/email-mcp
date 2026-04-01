@@ -4,6 +4,7 @@ import {
   sanitizeTemplateVariable,
   validateInputLength,
   validateLabelName,
+  validateRecipientDomain,
   validateWebhookUrl,
 } from './validation.js';
 
@@ -101,6 +102,64 @@ describe('validateWebhookUrl', () => {
 
   it('allows valid public http URL', () => {
     expect(() => validateWebhookUrl('http://hooks.example.com/wh')).not.toThrow();
+  });
+
+  it('blocks cloud metadata endpoint (169.254.169.254)', () => {
+    expect(() => validateWebhookUrl('http://169.254.169.254/latest/meta-data')).toThrow(
+      'cloud metadata',
+    );
+  });
+
+  it('blocks CGNAT range (100.64.x.x)', () => {
+    expect(() => validateWebhookUrl('http://100.100.100.100/api')).toThrow('CGNAT');
+  });
+
+  it('blocks IPv6 ULA (fd00::)', () => {
+    expect(() => validateWebhookUrl('http://[fd00::1]/hook')).toThrow('private or reserved IPv6');
+  });
+
+  it('blocks IPv6 link-local (fe80::)', () => {
+    expect(() => validateWebhookUrl('http://[fe80::1]/hook')).toThrow('private or reserved IPv6');
+  });
+});
+
+describe('validateRecipientDomain', () => {
+  it('allows any domain when lists are empty', () => {
+    expect(() => validateRecipientDomain('user@anything.com', [], [])).not.toThrow();
+  });
+
+  it('blocks domain on blockedDomains list', () => {
+    expect(() => validateRecipientDomain('user@evil.com', [], ['evil.com'])).toThrow(
+      'blocked by send policy',
+    );
+  });
+
+  it('allows domain not on blockedDomains list', () => {
+    expect(() => validateRecipientDomain('user@good.com', [], ['evil.com'])).not.toThrow();
+  });
+
+  it('allows domain on allowedDomains list', () => {
+    expect(() => validateRecipientDomain('user@corp.com', ['corp.com'], [])).not.toThrow();
+  });
+
+  it('blocks domain not on allowedDomains list', () => {
+    expect(() => validateRecipientDomain('user@other.com', ['corp.com'], [])).toThrow(
+      'not in the allowed domains',
+    );
+  });
+
+  it('is case-insensitive', () => {
+    expect(() => validateRecipientDomain('user@CORP.COM', ['corp.com'], [])).not.toThrow();
+  });
+
+  it('blocks before allowing when domain is on both lists', () => {
+    expect(() => validateRecipientDomain('user@both.com', ['both.com'], ['both.com'])).toThrow(
+      'blocked by send policy',
+    );
+  });
+
+  it('rejects email without @ symbol', () => {
+    expect(() => validateRecipientDomain('invalid', [], [])).toThrow('no domain');
   });
 });
 
