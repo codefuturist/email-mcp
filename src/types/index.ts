@@ -49,10 +49,13 @@ export interface SmtpConfig {
 export interface OAuth2Config {
   provider: 'google' | 'microsoft' | 'custom';
   clientId: string;
+  /** Empty for public clients (device code flow). */
   clientSecret: string;
   refreshToken: string;
   accessToken?: string;
   tokenExpiry?: number;
+  /** OAuth2 grant flow: "authorization_code" (default) or "device_code". */
+  flow?: 'authorization_code' | 'device_code';
   // Custom provider endpoints (only when provider = "custom")
   tokenUrl?: string;
   authUrl?: string;
@@ -65,6 +68,8 @@ export interface AccountConfig {
   fullName?: string;
   username: string;
   password?: string;
+  /** Credential source: "keychain", "env:VAR_NAME", or "plaintext" (default). */
+  credentialSource?: string;
   oauth2?: OAuth2Config;
   imap: ImapConfig;
   smtp: SmtpConfig;
@@ -137,10 +142,18 @@ export interface HooksConfig {
   calendarConfirm?: boolean;
 }
 
+export interface SendPolicyConfig {
+  /** Allowed recipient domains. If non-empty, ONLY these domains can receive email. */
+  allowedDomains: string[];
+  /** Blocked recipient domains. Emails to these domains are always rejected. */
+  blockedDomains: string[];
+}
+
 export interface AppConfig {
   settings: {
     rateLimit: number;
     readOnly: boolean;
+    sendPolicy: SendPolicyConfig;
     watcher: WatcherConfig;
     hooks: HooksConfig;
   };

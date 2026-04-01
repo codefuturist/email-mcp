@@ -6,15 +6,31 @@
 
 import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
-import type { SendResult } from '../types/index.js';
+import { validateRecipientDomain } from '../safety/validation.js';
+import type { SendPolicyConfig, SendResult } from '../types/index.js';
 import type ImapService from './imap.service.js';
 
 export default class SmtpService {
+  private sendPolicy: SendPolicyConfig;
+
   constructor(
     private connections: IConnectionManager,
     private rateLimiter: RateLimiter,
     private imapService: ImapService,
-  ) {}
+    sendPolicy?: SendPolicyConfig,
+  ) {
+    this.sendPolicy = sendPolicy ?? { allowedDomains: [], blockedDomains: [] };
+  }
+
+  /**
+   * Validate all recipient addresses against the send policy domain rules.
+   * Checks to, cc, and bcc fields.
+   */
+  private checkSendPolicy(recipients: string[]): void {
+    recipients.forEach((addr) => {
+      validateRecipientDomain(addr, this.sendPolicy.allowedDomains, this.sendPolicy.blockedDomains);
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Send email
@@ -32,6 +48,7 @@ export default class SmtpService {
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
+    this.checkSendPolicy([...options.to, ...(options.cc ?? []), ...(options.bcc ?? [])]);
 
     const account = this.connections.getAccount(accountName);
     const transport = await this.connections.getSmtpTransport(accountName);
@@ -89,6 +106,8 @@ export default class SmtpService {
         });
     }
 
+    this.checkSendPolicy([...to, ...cc]);
+
     // Build threading headers
     const references = [...(original.references ?? []), original.messageId].filter(Boolean);
 
@@ -129,6 +148,7 @@ export default class SmtpService {
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
+    this.checkSendPolicy([...options.to, ...(options.cc ?? [])]);
 
     const account = this.connections.getAccount(accountName);
     const original = await this.imapService.getEmail(accountName, options.emailId, options.mailbox);
@@ -193,6 +213,12 @@ export default class SmtpService {
       draftId,
       mailbox,
     );
+
+    const allRecipients = [
+      ...draft.to.map((a) => a.address),
+      ...(draft.cc ?? []).map((a) => a.address),
+    ];
+    this.checkSendPolicy(allRecipients);
 
     const account = this.connections.getAccount(accountName);
     const transport = await this.connections.getSmtpTransport(accountName);

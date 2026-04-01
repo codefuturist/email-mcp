@@ -20,7 +20,7 @@ jobs:
   npm:
     name: Publish to npm
     if: ${{ !inputs.skip-npm }}
-    uses: codefuturist/shared-workflows/.github/workflows/release-npm.yml@v1
+    uses: codefuturist/shared-workflows/.github/workflows/release-npm.yml@b2d5cf9922522d574e8ee1116b6de1e6b7ade6d7 # v1
     permissions:
       contents: read
       id-token: write
@@ -50,9 +50,14 @@ jobs:
           ARCH="${ARCH/aarch64/arm64}"
           BASE="https://github.com/modelcontextprotocol"
           BASE="${BASE}/registry/releases/latest/download"
-          curl -L \
-            "${BASE}/mcp-publisher_${OS}_${ARCH}.tar.gz" \
-            | tar xz mcp-publisher
+          ARCHIVE="mcp-publisher_${OS}_${ARCH}.tar.gz"
+          curl -L -o "${ARCHIVE}" "${BASE}/${ARCHIVE}"
+          curl -L -o checksums.txt "${BASE}/checksums.txt"
+          # Verify checksum before extracting
+          grep "${ARCHIVE}" checksums.txt | sha256sum -c --status \
+            || { echo "ERROR: Checksum verification failed for ${ARCHIVE}"; exit 1; }
+          tar xzf "${ARCHIVE}" mcp-publisher
+          rm -f "${ARCHIVE}" checksums.txt
 
       - name: Set version in server.json
         run: |
@@ -87,7 +92,7 @@ jobs:
           fetch-depth: 0
 
       - name: Docker setup
-        uses: codefuturist/shared-workflows/actions/docker-setup@v1
+        uses: codefuturist/shared-workflows/actions/docker-setup@b2d5cf9922522d574e8ee1116b6de1e6b7ade6d7 # v1
         with:
           ghcr-username: ${{ github.actor }}
           ghcr-token: ${{ secrets.GITHUB_TOKEN }}

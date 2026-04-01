@@ -121,15 +121,28 @@ interface JXAScriptOptions {
   confirm: boolean;
 }
 
-/** @internal Exported for testing. */
+/**
+ * Escape a string for safe embedding in an AppleScript double-quoted string.
+ *
+ * In addition to basic escaping (backslash, quotes, newlines), we also:
+ * - Strip ASCII control characters (0x00-0x1F except \t \n \r, already handled)
+ * - Truncate to 1000 characters to prevent oversized script arguments
+ *
+ * @internal Exported for testing.
+ */
 export function escapeAS(s: string): string {
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\r\n/g, '\\n')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t');
+  return (
+    s
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — strip control chars
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '') // eslint-disable-line no-control-regex
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\r\n/g, '\\n')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t')
+      .slice(0, 1000)
+  );
 }
 
 /**

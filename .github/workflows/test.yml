@@ -1,0 +1,116 @@
+name: Test & Sanity Check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint (Biome + ESLint)
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: reports/
+          retention-days: 14
+
+  sanity:
+    name: Sanity Check
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Verify built artifacts exist
+        run: |
+          test -f dist/main.js || { echo "FAIL: dist/main.js missing"; exit 1; }
+          echo "✓ dist/main.js exists ($(wc -c < dist/main.js) bytes)"
+
+      - name: Server starts and responds to --version
+        run: |
+          VERSION=$(node dist/main.js --version)
+          echo "✓ email-mcp version: ${VERSION}"
+          [[ -n "$VERSION" ]] || { echo "FAIL: empty version"; exit 1; }
+
+      - name: Server exits cleanly on --help
+        run: |
+          node dist/main.js help | head -5
+          echo "✓ help output OK"
+
+      - name: Config init generates valid TOML
+        run: |
+          node -e "
+            import('./dist/config/loader.js').then(m => {
+              const tpl = m.generateTemplate();
+              if (!tpl.includes('[accounts]')) {
+                console.error('FAIL: template missing [accounts]');
+                process.exit(1);
+              }
+              console.log('✓ config template is valid (' + tpl.length + ' chars)');
+            });
+          "
+
+      - name: Tool registration smoke test
+        run: |
+          node -e "
+            import('./dist/server.js').then(({ default: createServer }) => {
+              const server = createServer();
+              if (!server) {
+                console.error('FAIL: createServer() returned falsy');
+                process.exit(1);
+              }
+              console.log('✓ MCP server instance created');
+            });
+          "
+
+      - name: Docker build
+        run: docker build -t email-mcp:sanity .
+
+      - name: Docker --version
+        run: |
+          VERSION=$(docker run --rm email-mcp:sanity --version)
+          echo "✓ Docker image version: ${VERSION}"
+          [[ -n "$VERSION" ]] || { echo "FAIL: empty version from Docker"; exit 1; }

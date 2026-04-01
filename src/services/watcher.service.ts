@@ -13,7 +13,9 @@
 import { ImapFlow } from 'imapflow';
 import { mcpLog } from '../logging.js';
 import type { AccountConfig, EmailMeta, WatcherConfig } from '../types/index.js';
+import { resolveCredential } from './credential.service.js';
 import eventBus from './event-bus.js';
+import type OAuthService from './oauth.service.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,9 +67,12 @@ export default class WatcherService {
 
   private accounts: AccountConfig[];
 
-  constructor(config: WatcherConfig, accounts: AccountConfig[]) {
+  private oauthService?: OAuthService;
+
+  constructor(config: WatcherConfig, accounts: AccountConfig[], oauthService?: OAuthService) {
     this.config = config;
     this.accounts = accounts;
+    this.oauthService = oauthService;
   }
 
   async start(): Promise<void> {
@@ -144,9 +149,18 @@ export default class WatcherService {
     if (!state || state.stopped) return;
 
     try {
-      const auth = state.account.oauth2
-        ? { user: state.account.username, accessToken: state.account.password }
-        : { user: state.account.username, pass: state.account.password };
+      let auth: { user: string; pass?: string; accessToken?: string };
+      if (state.account.oauth2 && this.oauthService) {
+        const accessToken = await this.oauthService.getAccessToken(state.account.oauth2);
+        auth = { user: state.account.username, accessToken };
+      } else {
+        const { password } = await resolveCredential(
+          state.account.name,
+          state.account.credentialSource,
+          state.account.password,
+        );
+        auth = { user: state.account.username, pass: password };
+      }
 
       const client = new ImapFlow({
         host: state.account.imap.host,
