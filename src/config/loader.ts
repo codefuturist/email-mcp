@@ -156,6 +156,7 @@ function normalizeOAuth2(raw: NonNullable<RawAccountConfig['oauth2']>): OAuth2Co
     clientId: raw.client_id,
     clientSecret: raw.client_secret,
     refreshToken: raw.refresh_token,
+    flow: raw.flow,
     tokenUrl: raw.token_url,
     authUrl: raw.auth_url,
     scopes: raw.scopes,

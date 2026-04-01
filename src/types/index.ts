@@ -49,10 +49,13 @@ export interface SmtpConfig {
 export interface OAuth2Config {
   provider: 'google' | 'microsoft' | 'custom';
   clientId: string;
+  /** Empty for public clients (device code flow). */
   clientSecret: string;
   refreshToken: string;
   accessToken?: string;
   tokenExpiry?: number;
+  /** OAuth2 grant flow: "authorization_code" (default) or "device_code". */
+  flow?: 'authorization_code' | 'device_code';
   // Custom provider endpoints (only when provider = "custom")
   tokenUrl?: string;
   authUrl?: string;

@@ -25,6 +25,7 @@ import { CONFIG_FILE, configExists, loadRawConfig, saveConfig } from '../config/
 import type { RawAccountConfig, RawAppConfig } from '../config/schema.js';
 import { AppConfigFileSchema } from '../config/schema.js';
 import ConnectionManager from '../connections/manager.js';
+import OAuthService, { WELL_KNOWN_CLIENTS } from '../services/oauth.service.js';
 import type { AccountConfig } from '../types/index.js';
 import ensureInteractive from './guard.js';
 import { detectProvider } from './providers.js';
@@ -254,6 +255,75 @@ async function promptCredentials(defaults?: {
   return { username, password };
 }
 
+// ---------------------------------------------------------------------------
+// Device Code Flow (M365 corporate accounts)
+// ---------------------------------------------------------------------------
+
+interface DeviceCodeAuthResult {
+  oauth2: NonNullable<RawAccountConfig['oauth2']>;
+  username: string;
+}
+
+/**
+ * Authenticate via Microsoft device code flow.
+ * Shows a code for the user to enter at https://microsoft.com/devicelogin,
+ * then polls until authentication completes.
+ */
+async function authenticateDeviceCode(email: string): Promise<DeviceCodeAuthResult> {
+  // Pick a well-known client ID
+  const clientChoice = await select({
+    message: 'Which app identity should we use?',
+    options: WELL_KNOWN_CLIENTS.map((c) => ({
+      value: c.id,
+      label: c.name,
+      hint: c.description,
+    })),
+  });
+  assertNotCancel(clientChoice);
+  const clientId = clientChoice;
+
+  const spinner = p_spinner();
+  spinner.start('Requesting device code from Microsoft…');
+
+  const deviceCode = await OAuthService.requestDeviceCode(clientId, 'microsoft');
+  spinner.stop('Device code received.');
+
+  note(
+    [
+      `Code:  ${deviceCode.userCode}`,
+      `URL:   ${deviceCode.verificationUri}`,
+      '',
+      deviceCode.message,
+    ].join('\n'),
+    'Sign in with your corporate account',
+  );
+
+  log.info('Waiting for you to complete sign-in in your browser…');
+
+  const spinner2 = p_spinner();
+  spinner2.start('Polling for authentication…');
+
+  const tokens = await OAuthService.pollDeviceCodeToken(
+    clientId,
+    deviceCode.deviceCode,
+    deviceCode.interval,
+    deviceCode.expiresIn,
+  );
+
+  spinner2.stop('Authentication successful!');
+
+  return {
+    oauth2: {
+      provider: 'microsoft',
+      client_id: clientId,
+      client_secret: '',
+      refresh_token: tokens.refreshToken,
+      flow: 'device_code',
+    },
+    username: email,
+  };
+}
+
 /**
  * Auto-detect provider settings from email domain.
  * Returns server settings or prompts for manual entry.
@@ -480,16 +550,77 @@ async function addAccount(): Promise<void> {
   // 2. Server settings (auto-detect or manual)
   const server = await resolveServerSettings(identity.email);
 
-  // 3. Credentials
-  const creds = await promptCredentials({ email: identity.email });
+  // 3. Authentication method
+  const domain = identity.email.split('@')[1]?.toLowerCase() ?? '';
+  const isMicrosoft =
+    ['outlook.com', 'hotmail.com', 'live.com'].includes(domain) || !domain.includes('gmail');
+  // Offer device code for any domain that could be M365 (non-Gmail, non-Yahoo, etc.)
+  const isLikelyM365 =
+    isMicrosoft &&
+    !['gmail.com', 'googlemail.com', 'yahoo.com', 'icloud.com', 'fastmail.com'].includes(domain);
 
-  // 4. Test connections
-  const testAccount = buildTestAccount(identity, creds, server);
-  const ok = await testConnections(testAccount);
-  if (!ok) return;
+  let newAccount: RawAccountConfig;
 
-  // 5. Build and save
-  const newAccount = buildRawAccount(identity, creds, server);
+  if (isLikelyM365) {
+    const authMethod = await select({
+      message: 'Authentication method',
+      options: [
+        {
+          value: 'password',
+          label: 'Password / App Password',
+          hint: 'Standard username + password',
+        },
+        {
+          value: 'device_code',
+          label: 'Microsoft 365 Sign-In (Device Code)',
+          hint: 'Sign in via browser — no IT exception needed',
+        },
+      ],
+    });
+    assertNotCancel(authMethod);
+
+    if (authMethod === 'device_code') {
+      const dcResult = await authenticateDeviceCode(identity.email);
+      newAccount = {
+        name: identity.name,
+        email: identity.email,
+        full_name: identity.fullName || undefined,
+        username: dcResult.username,
+        oauth2: dcResult.oauth2,
+        imap: {
+          host: server.imapHost,
+          port: server.imapPort,
+          tls: server.imapTls,
+          starttls: !server.imapTls,
+          verify_ssl: true,
+        },
+        smtp: {
+          host: server.smtpHost,
+          port: server.smtpPort,
+          tls: server.smtpTls,
+          starttls: server.smtpStarttls,
+          verify_ssl: true,
+          pool: {
+            enabled: server.smtpPoolEnabled,
+            max_connections: server.smtpPoolMaxConnections,
+            max_messages: server.smtpPoolMaxMessages,
+          },
+        },
+      };
+    } else {
+      const creds = await promptCredentials({ email: identity.email });
+      const testAccount = buildTestAccount(identity, creds, server);
+      const ok = await testConnections(testAccount);
+      if (!ok) return;
+      newAccount = buildRawAccount(identity, creds, server);
+    }
+  } else {
+    const creds = await promptCredentials({ email: identity.email });
+    const testAccount = buildTestAccount(identity, creds, server);
+    const ok = await testConnections(testAccount);
+    if (!ok) return;
+    newAccount = buildRawAccount(identity, creds, server);
+  }
   const config: RawAppConfig = existingConfig
     ? {
         ...existingConfig,

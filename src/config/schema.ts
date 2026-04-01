@@ -34,8 +34,9 @@ export const SmtpConfigSchema = z.object({
 export const OAuth2ConfigSchema = z.object({
   provider: z.enum(['google', 'microsoft', 'custom']),
   client_id: z.string().min(1, 'OAuth2 client_id is required'),
-  client_secret: z.string().min(1, 'OAuth2 client_secret is required'),
+  client_secret: z.string().default(''),
   refresh_token: z.string().min(1, 'OAuth2 refresh_token is required'),
+  flow: z.enum(['authorization_code', 'device_code']).optional(),
   // Custom provider endpoints (only when provider = "custom")
   token_url: z.string().url().optional(),
   auth_url: z.string().url().optional(),
