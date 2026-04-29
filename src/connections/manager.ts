@@ -96,6 +96,38 @@ export default class ConnectionManager implements IConnectionManager {
       logger: false,
     });
 
+    // Attach error/close handlers BEFORE connect so we never miss an event.
+    //
+    // Without these, an idle IMAP connection that the server later drops (most
+    // hosted providers close IDLE sessions after ~29 min) emits an `error`
+    // event with no listener — Node treats that as an uncaughtException and
+    // exits the process silently. Because `logger: false` swallows stderr,
+    // there is no trace in the MCP log; the server simply disappears mid
+    // session and the client (Claude Code, Cursor, etc.) reports the tools as
+    // disconnected with no obvious cause.
+    //
+    // Swallow the error, log it, and drop the stale entry so the next call to
+    // `getImapClient` lazy-reconnects via the existing `usable` check.
+    client.on('error', (err: unknown) => {
+      mcpLog(
+        'warning',
+        'imap',
+        `Connection error for "${accountName}": ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ).catch(() => {
+        /* swallow — logging must not throw in an error handler */
+      });
+      if (this.imapClients.get(accountName) === client) {
+        this.imapClients.delete(accountName);
+      }
+    });
+    client.on('close', () => {
+      if (this.imapClients.get(accountName) === client) {
+        this.imapClients.delete(accountName);
+      }
+    });
+
     await client.connect();
     await mcpLog(
       'info',
