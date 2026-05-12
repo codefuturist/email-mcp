@@ -421,19 +421,37 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     'search_emails',
     'Search emails by keyword across subject, sender, and body. ' +
       'Omit query (or pass an empty string) to use it as a pure filter — e.g. find all emails ' +
-      'with attachments from a specific recipient without a keyword. ' +
-      'Supports additional filters for recipient, attachments, size, and reply status.',
+      'from a specific sender without a keyword. ' +
+      'Supports additional filters for sender, recipient, date range (since/before — INTERNALDATE; ' +
+      'sent_since/sent_before — Date: header), attachments, size, and reply status. ' +
+      'At least one of query/from/to/since/before/sent_since/sent_before/has_attachment/' +
+      'larger_than/smaller_than/answered must be set; otherwise the call errors ' +
+      '(use list_emails to browse without filters).',
     {
       account: z.string().describe('Account name from list_accounts'),
       query: z
         .string()
         .optional()
         .default('')
-        .describe('Search keyword (omit or leave empty to use filters only)'),
+        .describe('Search keyword across subject, sender, and body (omit to use filters only)'),
       mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
       page: z.number().int().min(1).default(1).describe('Page number'),
       pageSize: z.number().int().min(1).max(100).default(20).describe('Results per page'),
+      from: z.string().optional().describe('Filter by sender address (substring match)'),
       to: z.string().optional().describe('Filter by recipient address'),
+      since: z
+        .string()
+        .optional()
+        .describe('Only emails received on/after this date (ISO 8601, e.g. 2026-05-11T00:00:00Z)'),
+      before: z.string().optional().describe('Only emails received before this date (ISO 8601)'),
+      sent_since: z
+        .string()
+        .optional()
+        .describe('Only emails with Date: header on/after this date (ISO 8601)'),
+      sent_before: z
+        .string()
+        .optional()
+        .describe('Only emails with Date: header before this date (ISO 8601)'),
       has_attachment: z
         .boolean()
         .optional()
@@ -449,7 +467,12 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
           mailbox: params.mailbox,
           page: params.page,
           pageSize: params.pageSize,
+          from: params.from,
           to: params.to,
+          since: params.since,
+          before: params.before,
+          sentSince: params.sent_since,
+          sentBefore: params.sent_before,
           hasAttachment: params.has_attachment,
           largerThan: params.larger_than,
           smallerThan: params.smaller_than,
