@@ -2,6 +2,28 @@ services:
   email-mcp:
     build: .
     image: codefuturist/email-mcp:latest
-    stdin_open: true # required for stdio transport
     volumes:
-      - ${EMAIL_MCP_CONFIG:-~/.config/email-mcp}:/home/node/.config/email-mcp:ro
+      - ${EMAIL_MCP_CONFIG:-${HOME}/.config/email-mcp}:/home/node/.config/email-mcp:ro
+    profiles:
+      - stdio
+      - http
+    stdin_open: true
+    tty: false
+
+  email-mcp-http:
+    build: .
+    image: codefuturist/email-mcp:latest
+    command: ["http", "8080"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${EMAIL_MCP_CONFIG:-${HOME}/.config/email-mcp}:/home/node/.config/email-mcp:ro
+    profiles:
+      - http
+    stdin_open: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3

@@ -138,7 +138,11 @@ export default class HooksService {
 
     if (this.started) {
       // Client reconnected — server reference updated above, no need to re-register listeners.
-      mcpLog('info', 'hooks', `Hooks reconnected: sampling=${this.samplingSupported ? 'yes' : 'no'}`).catch(() => {});
+      mcpLog(
+        'info',
+        'hooks',
+        `Hooks reconnected: sampling=${this.samplingSupported ? 'yes' : 'no'}`,
+      ).catch(() => {});
       return;
     }
     this.started = true;

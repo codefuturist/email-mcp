@@ -328,3 +328,6 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/linux,windows,macos,node,visualstudiocode,jetbrains+all
 .mcpregistry_*
+
+# OpenCode planning artifacts
+.sisyphus/

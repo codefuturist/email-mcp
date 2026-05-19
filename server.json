@@ -17,6 +17,16 @@
       "transport": {
         "type": "stdio"
       }
+    },
+    {
+      "registryType": "npm",
+      "identifier": "@codefuturist/email-mcp",
+      "version": "0.2.3",
+      "runtimeHint": "http",
+      "transport": {
+        "type": "streamable-http"
+      },
+      "url": "http://localhost:8080/mcp"
     }
   ]
 }
