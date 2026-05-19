@@ -1,0 +1,22 @@
+# HTTP transport override — rename to docker-compose.override.yml to activate.
+# Docker Compose auto-merges this file with docker-compose.yml.
+#
+# Usage:
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#   docker compose up
+#
+# To disable again:
+#   rm docker-compose.override.yml
+
+services:
+  email-mcp:
+    command: ["http", "8080"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    stdin_open: false
+    healthcheck:
+      test: ["CMD", "node", "docker-healthcheck.js"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3

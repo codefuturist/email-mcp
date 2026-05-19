@@ -331,3 +331,6 @@ $RECYCLE.BIN/
 
 # OpenCode planning artifacts
 .sisyphus/
+
+# Local Docker Compose override (HTTP mode)
+docker-compose.override.yml
