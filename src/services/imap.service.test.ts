@@ -165,4 +165,62 @@ describe('ImapService', () => {
       expect(client.messageFlagsAdd).toHaveBeenCalledWith('10', ['\\Flagged'], { uid: true });
     });
   });
+
+  // -----------------------------------------------------------------------
+  // searchEmails — criteria builder
+  // -----------------------------------------------------------------------
+
+  describe('searchEmails', () => {
+    it('throws when no query and no filters are provided', async () => {
+      await expect(service.searchEmails('test', '')).rejects.toThrow(
+        /at least one of: query, from, to/,
+      );
+      expect(client.search).not.toHaveBeenCalled();
+    });
+
+    it('builds an OR criteria across subject/from/body for a keyword query', async () => {
+      await service.searchEmails('test', 'invoice');
+
+      expect(client.search).toHaveBeenCalledTimes(1);
+      const [criteria] = client.search.mock.calls[0];
+      expect(criteria).toMatchObject({
+        or: [{ subject: 'invoice' }, { from: 'invoice' }, { body: 'invoice' }],
+      });
+    });
+
+    it('AND-combines from with the OR keyword criteria', async () => {
+      await service.searchEmails('test', 'invoice', { from: 'billing@example.com' });
+
+      const [criteria] = client.search.mock.calls[0];
+      expect(criteria).toMatchObject({
+        or: [{ subject: 'invoice' }, { from: 'invoice' }, { body: 'invoice' }],
+        from: 'billing@example.com',
+      });
+    });
+
+    it('passes since/before/sentSince/sentBefore as Date objects', async () => {
+      await service.searchEmails('test', '', {
+        from: 'billing@example.com',
+        since: '2026-05-01T00:00:00Z',
+        before: '2026-05-08T00:00:00Z',
+        sentSince: '2026-05-01T00:00:00Z',
+        sentBefore: '2026-05-08T00:00:00Z',
+      });
+
+      const [criteria] = client.search.mock.calls[0];
+      expect(criteria.since).toBeInstanceOf(Date);
+      expect(criteria.before).toBeInstanceOf(Date);
+      expect(criteria.sentSince).toBeInstanceOf(Date);
+      expect(criteria.sentBefore).toBeInstanceOf(Date);
+      expect((criteria.since as Date).toISOString()).toBe('2026-05-01T00:00:00.000Z');
+      expect((criteria.before as Date).toISOString()).toBe('2026-05-08T00:00:00.000Z');
+    });
+
+    it('allows search with only a filter (no keyword)', async () => {
+      await expect(
+        service.searchEmails('test', '', { since: '2026-05-01T00:00:00Z' }),
+      ).resolves.toMatchObject({ items: [], total: 0 });
+      expect(client.search).toHaveBeenCalledTimes(1);
+    });
+  });
 });
