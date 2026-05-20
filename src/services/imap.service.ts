@@ -1054,6 +1054,55 @@ export default class ImapService {
   }
 
   /**
+   * Append a sent message to the Sent folder via IMAP.
+   * Called after SMTP send to keep the Sent mailbox in sync.
+   */
+  async saveToSent(
+    accountName: string,
+    options: {
+      from: string;
+      to: string[];
+      subject: string;
+      body: string;
+      messageId?: string;
+      cc?: string[];
+      bcc?: string[];
+      html?: boolean;
+      inReplyTo?: string;
+      references?: string;
+    },
+  ): Promise<void> {
+    const client = await this.connections.getImapClient(accountName);
+
+    // Find the Sent folder
+    const mailboxes = await client.list();
+    const sent = mailboxes.find((mb) => mb.specialUse === '\\Sent');
+    const sentPath = sent?.path ?? 'Sent Messages';
+
+    // Construct RFC 822 message
+    const headers = [
+      `From: ${options.from}`,
+      `To: ${options.to.join(', ')}`,
+      `Subject: ${options.subject}`,
+      `Date: ${new Date().toUTCString()}`,
+      `MIME-Version: 1.0`,
+    ];
+
+    if (options.messageId) headers.push(`Message-ID: ${options.messageId}`);
+    if (options.cc?.length) headers.push(`Cc: ${options.cc.join(', ')}`);
+    if (options.bcc?.length) headers.push(`Bcc: ${options.bcc.join(', ')}`);
+    if (options.inReplyTo) headers.push(`In-Reply-To: ${options.inReplyTo}`);
+    if (options.references) headers.push(`References: ${options.references}`);
+
+    const contentType = options.html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8';
+    headers.push(`Content-Type: ${contentType}`);
+
+    const rawMessage = `${headers.join('\r\n')}\r\n\r\n${options.body}`;
+
+    await client.append(sentPath, Buffer.from(rawMessage), ['\\Seen']);
+  }
+
+  /**
    * Fetch a draft message for sending.
    * Returns the parsed draft with recipients and content.
    */

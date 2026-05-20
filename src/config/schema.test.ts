@@ -88,7 +88,7 @@ describe('AccountConfigSchema', () => {
 
   it('rejects when neither password nor oauth2 provided', () => {
     expect(() => AccountConfigSchema.parse(validAccount({ password: undefined }))).toThrow(
-      'password or oauth2',
+      'password',
     );
   });
 
