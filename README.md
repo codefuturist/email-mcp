@@ -69,7 +69,7 @@ npx @codefuturist/email-mcp setup
 pnpm dlx @codefuturist/email-mcp setup
 
 # Or install globally
-npm install -g @codefuturist/email-mcp
+sudo npm install -g @codefuturist/email-mcp
 # or
 pnpm add -g @codefuturist/email-mcp
 ```
