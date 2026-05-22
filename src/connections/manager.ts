@@ -102,6 +102,17 @@ export default class ConnectionManager implements IConnectionManager {
       'imap',
       `Connected to ${account.imap.host}:${account.imap.port} for "${accountName}"`,
     );
+
+    // Absorb connection errors (e.g. idle socket timeout) so Node doesn't crash.
+    // imapflow sets client.usable = false on error; the next getImapClient() call
+    // sees usable === false and reconnects transparently.
+    client.on('error', (err: Error) => {
+      mcpLog('warning', 'imap', `IMAP connection lost for "${accountName}": ${err.message}`).catch(
+        () => {},
+      );
+      this.imapClients.delete(accountName);
+    });
+
     this.imapClients.set(accountName, client);
     return client;
   }
