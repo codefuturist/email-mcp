@@ -80,6 +80,15 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       body: z.string().describe('Reply body content'),
       replyAll: z.boolean().default(false).describe('Reply to all recipients'),
       html: z.boolean().default(false).describe('Send as HTML'),
+      quoteOriginal: z
+        .boolean()
+        .default(true)
+        .describe(
+          'Append the original message as a quoted block below the reply ' +
+            '(Thunderbird/Outlook style: "On DATE, NAME wrote:" + > prefix for ' +
+            'text replies, or <blockquote type="cite"> for HTML). Disable to ' +
+            'send the bare reply body only.',
+        ),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {

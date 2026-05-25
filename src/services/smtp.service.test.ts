@@ -37,8 +37,29 @@ function createMockRateLimiter(allowed = true) {
   } as unknown as RateLimiter;
 }
 
-function createMockImapService() {
-  return {} as unknown as ImapService;
+function createMockImapService(overrides: Partial<ImapService> = {}) {
+  return overrides as unknown as ImapService;
+}
+
+function makeOriginalEmail() {
+  return {
+    id: '42',
+    subject: 'Project update',
+    from: { name: 'Alex', address: 'alex@example.com' },
+    to: [{ address: 'test@example.com' }],
+    cc: [],
+    date: 'Mon, 25 May 2026 16:11:00 +0200',
+    seen: true,
+    flagged: false,
+    answered: false,
+    hasAttachments: false,
+    labels: [],
+    messageId: '<orig-42@example.com>',
+    references: ['<root@example.com>'],
+    bodyText: 'Where are we on the launch?',
+    attachments: [],
+    headers: {},
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +144,71 @@ describe('SmtpService', () => {
       const call = transport.sendMail.mock.calls[0][0];
       expect(call.html).toBe('<h1>Hello</h1>');
       expect(call.text).toBeUndefined();
+    });
+  });
+
+  describe('replyToEmail quote_original', () => {
+    it('appends quoted original below text reply by default', async () => {
+      const imap = createMockImapService({
+        getEmail: vi.fn().mockResolvedValue(makeOriginalEmail()),
+      } as unknown as Partial<ImapService>);
+      service = new SmtpService(connections, rateLimiter, imap);
+
+      await service.replyToEmail('test', {
+        emailId: '42',
+        body: 'On it tomorrow.',
+      });
+
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(call.text).toContain('On it tomorrow.');
+      expect(call.text).toContain(
+        'On Mon, 25 May 2026 16:11:00 +0200, Alex <alex@example.com> wrote:',
+      );
+      expect(call.text).toContain('> Where are we on the launch?');
+      expect(call.subject).toBe('Re: Project update');
+      expect(call.inReplyTo).toBe('<orig-42@example.com>');
+      expect(call.references).toContain('<root@example.com>');
+      expect(call.references).toContain('<orig-42@example.com>');
+    });
+
+    it('appends <blockquote type="cite"> for HTML replies', async () => {
+      const imap = createMockImapService({
+        getEmail: vi.fn().mockResolvedValue({
+          ...makeOriginalEmail(),
+          bodyHtml: '<p>Where are we?</p>',
+        }),
+      } as unknown as Partial<ImapService>);
+      service = new SmtpService(connections, rateLimiter, imap);
+
+      await service.replyToEmail('test', {
+        emailId: '42',
+        body: '<p>On it tomorrow.</p>',
+        html: true,
+      });
+
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(call.html).toContain('<p>On it tomorrow.</p>');
+      expect(call.html).toContain('<blockquote type="cite"');
+      expect(call.html).toContain('<p>Where are we?</p>');
+      expect(call.text).toBeUndefined();
+    });
+
+    it('does not append quoted block when quoteOriginal=false', async () => {
+      const imap = createMockImapService({
+        getEmail: vi.fn().mockResolvedValue(makeOriginalEmail()),
+      } as unknown as Partial<ImapService>);
+      service = new SmtpService(connections, rateLimiter, imap);
+
+      await service.replyToEmail('test', {
+        emailId: '42',
+        body: 'On it tomorrow.',
+        quoteOriginal: false,
+      });
+
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(call.text).toBe('On it tomorrow.');
+      expect(call.text).not.toContain('wrote:');
+      expect(call.text).not.toContain('>');
     });
   });
 });
