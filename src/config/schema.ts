@@ -144,7 +144,12 @@ export const SettingsSchema = z.object({
   }),
 });
 
+export const AgentMailConfigSchema = z.object({
+  api_key: z.string().min(1, 'AgentMail API key is required'),
+});
+
 export const AppConfigFileSchema = z.object({
+  agentmail: AgentMailConfigSchema.optional(),
   settings: SettingsSchema.default({
     rate_limit: 10,
     read_only: false,
@@ -173,8 +178,11 @@ export const AppConfigFileSchema = z.object({
       calendar_confirm: true,
     },
   }),
-  accounts: z.array(AccountConfigSchema).min(1, 'At least one account is required'),
-});
+  accounts: z.array(AccountConfigSchema).default([]),
+})
+  .refine((data) => data.accounts.length > 0 || data.agentmail != null, {
+    message: 'At least one IMAP/SMTP account or an [agentmail] section is required',
+  });
 
 export type RawAccountConfig = z.infer<typeof AccountConfigSchema>;
 export type RawAppConfig = z.infer<typeof AppConfigFileSchema>;

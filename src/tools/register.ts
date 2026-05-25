@@ -16,8 +16,10 @@ import type SchedulerService from '../services/scheduler.service.js';
 import type SmtpService from '../services/smtp.service.js';
 import type TemplateService from '../services/template.service.js';
 import type WatcherService from '../services/watcher.service.js';
+import type AgentMailService from '../services/agentmail.service.js';
 import type { AppConfig } from '../types/index.js';
 import registerAccountsTools from './accounts.tool.js';
+import registerAgentMailTools from './agentmail.tool.js';
 import registerAnalyticsTools from './analytics.tool.js';
 import registerAttachmentTools from './attachments.tool.js';
 import registerBulkTools from './bulk.tool.js';
@@ -50,6 +52,7 @@ export default function registerAllTools(
   schedulerService: SchedulerService,
   watcherService: WatcherService,
   hooksService: HooksService,
+  agentMailService?: AgentMailService,
 ): void {
   const { readOnly } = config.settings;
 
@@ -83,5 +86,10 @@ export default function registerAllTools(
     registerFolderTools(server, imapService);
     registerTemplateWriteTools(server, templateService, imapService, smtpService);
     registerSchedulerTools(server, schedulerService);
+  }
+
+  // AgentMail tools — registered when an AgentMail API key is configured
+  if (agentMailService) {
+    registerAgentMailTools(server, agentMailService);
   }
 }

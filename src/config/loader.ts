@@ -207,6 +207,7 @@ function normalizeHookRule(raw: {
 
 function normalizeConfig(raw: RawAppConfig): AppConfig {
   return {
+    agentmail: raw.agentmail ? { apiKey: raw.agentmail.api_key } : undefined,
     settings: {
       rateLimit: raw.settings.rate_limit,
       readOnly: raw.settings.read_only,
@@ -281,6 +282,7 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
   throw new Error(
     `No configuration found.\n\n` +
       `Set environment variables (MCP_EMAIL_ADDRESS, MCP_EMAIL_PASSWORD, etc.)\n` +
+      `or set AGENTMAIL_API_KEY for AgentMail,\n` +
       `or create a config file at: ${configPath ?? CONFIG_FILE}\n\n` +
       `Run 'email-mcp setup' for interactive configuration.`,
   );
@@ -309,6 +311,14 @@ export function generateTemplate(): string {
 [settings]
 rate_limit = 10  # max emails per minute per account
 read_only = false  # set to true to disable all write operations
+
+# --- AgentMail (optional, alternative to IMAP/SMTP) ---
+# Uncomment to enable AgentMail as an email provider.
+# No IMAP/SMTP server configuration needed — just an API key.
+# Get your API key at https://agentmail.to
+#
+# [agentmail]
+# api_key = "your-agentmail-api-key"
 
 # [settings.watcher]
 # enabled = false        # enable IMAP IDLE real-time monitoring

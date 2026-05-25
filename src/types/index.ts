@@ -137,7 +137,12 @@ export interface HooksConfig {
   calendarConfirm?: boolean;
 }
 
+export interface AgentMailConfig {
+  apiKey: string;
+}
+
 export interface AppConfig {
+  agentmail?: AgentMailConfig;
   settings: {
     rateLimit: number;
     readOnly: boolean;
