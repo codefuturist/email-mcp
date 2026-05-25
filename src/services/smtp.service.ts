@@ -7,6 +7,7 @@
 import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
 import type { SendResult } from '../types/index.js';
+import { quoteOriginalAsHtml, quoteOriginalAsText } from '../utils/quote.js';
 import type ImapService from './imap.service.js';
 
 export default class SmtpService {
@@ -63,6 +64,13 @@ export default class SmtpService {
       body: string;
       replyAll?: boolean;
       html?: boolean;
+      /**
+       * When true (default), the original message is appended below the reply
+       * as a quoted block (Thunderbird/Outlook style: "On DATE, NAME wrote:"
+       * followed by `>`-prefixed lines, or `<blockquote type="cite">` for HTML
+       * replies). Set false to send the bare reply body only.
+       */
+      quoteOriginal?: boolean;
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
@@ -96,6 +104,13 @@ export default class SmtpService {
       ? original.subject
       : `Re: ${original.subject}`;
 
+    // Append quoted original below the reply body unless explicitly disabled.
+    const includeQuote = options.quoteOriginal !== false;
+    let { body } = options;
+    if (includeQuote) {
+      body += options.html ? quoteOriginalAsHtml(original) : quoteOriginalAsText(original);
+    }
+
     const transport = await this.connections.getSmtpTransport(accountName);
 
     const result = await transport.sendMail({
@@ -105,7 +120,7 @@ export default class SmtpService {
       subject,
       inReplyTo: original.messageId,
       references: references.join(' '),
-      ...(options.html ? { html: options.body } : { text: options.body }),
+      ...(options.html ? { html: body } : { text: body }),
     });
 
     return {
