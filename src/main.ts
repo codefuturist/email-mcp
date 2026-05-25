@@ -26,6 +26,7 @@ import registerAllPrompts from './prompts/register.js';
 import registerAllResources from './resources/register.js';
 import RateLimiter from './safety/rate-limiter.js';
 import createServer, { PKG_VERSION } from './server.js';
+import AgentMailService from './services/agentmail.service.js';
 import CalendarService from './services/calendar.service.js';
 import HooksService from './services/hooks.service.js';
 import ImapService from './services/imap.service.js';
@@ -96,6 +97,10 @@ async function runServer(): Promise<void> {
   const watcherService = new WatcherService(config.settings.watcher, config.accounts);
   const hooksService = new HooksService(config.settings.hooks, imapService);
 
+  // AgentMail (optional — only when [agentmail] section or AGENTMAIL_API_KEY env var is set)
+  const agentMailApiKey = config.agentmail?.apiKey ?? process.env.AGENTMAIL_API_KEY;
+  const agentMailService = agentMailApiKey ? new AgentMailService(agentMailApiKey) : undefined;
+
   const server = createServer();
   bindServer(server);
 
@@ -112,6 +117,7 @@ async function runServer(): Promise<void> {
     schedulerService,
     watcherService,
     hooksService,
+    agentMailService,
   );
   registerAllResources(server, connections, imapService, templateService, schedulerService);
   registerAllPrompts(server);
@@ -210,6 +216,10 @@ async function runHttpServer(port: number): Promise<void> {
   const watcherService = new WatcherService(config.settings.watcher, config.accounts);
   const hooksService = new HooksService(config.settings.hooks, imapService);
 
+  // AgentMail (optional)
+  const agentMailApiKey = config.agentmail?.apiKey ?? process.env.AGENTMAIL_API_KEY;
+  const agentMailService = agentMailApiKey ? new AgentMailService(agentMailApiKey) : undefined;
+
   // Per-session factory: tools share service instances but each MCP session
   // needs its own McpServer because the SDK binds one transport per server.
   function buildMcpSession() {
@@ -228,6 +238,7 @@ async function runHttpServer(port: number): Promise<void> {
       schedulerService,
       watcherService,
       hooksService,
+      agentMailService,
     );
     registerAllResources(server, connections, imapService, templateService, schedulerService);
     registerAllPrompts(server);

@@ -418,6 +418,43 @@ max_connections = 1
 max_messages = 100
 ```
 
+#### AgentMail (alternative provider)
+
+[AgentMail](https://agentmail.to) can be used as an alternative to IMAP/SMTP for users who want simpler setup. Instead of configuring mail server hosts, ports, and credentials, you just need an API key. AgentMail inboxes can be created programmatically and provide features like `extracted_text` that automatically strips quoted reply chains — useful for AI processing.
+
+Add to your `config.toml`:
+
+```toml
+[agentmail]
+api_key = "your-agentmail-api-key"
+```
+
+Or set the `AGENTMAIL_API_KEY` environment variable:
+
+```json
+{
+  "mcpServers": {
+    "email": {
+      "command": "npx",
+      "args": ["-y", "@codefuturist/email-mcp", "stdio"],
+      "env": {
+        "AGENTMAIL_API_KEY": "your-agentmail-api-key"
+      }
+    }
+  }
+}
+```
+
+When configured, the following additional tools become available:
+
+- `agentmail_create_inbox` — Create a new inbox with a unique `@agentmail.to` address
+- `agentmail_list_inboxes` — List all inboxes for the API key
+- `agentmail_list_messages` — List messages in an inbox
+- `agentmail_get_message` — Get full message content (with auto-stripped reply chains)
+- `agentmail_send_message` — Send email from an AgentMail inbox
+
+> **Note:** AgentMail tools are additive — all existing IMAP/SMTP tools continue to work alongside them. You can use both providers simultaneously.
+
 #### Environment Variables
 
 For single-account setups (overrides config file):
@@ -441,6 +478,7 @@ For single-account setups (overrides config file):
 | `MCP_EMAIL_SMTP_POOL_MAX_CONNECTIONS` | `1` | Max pooled SMTP connections |
 | `MCP_EMAIL_SMTP_POOL_MAX_MESSAGES` | `100` | Max messages per pooled connection |
 | `MCP_EMAIL_RATE_LIMIT` | `10` | Max sends per minute |
+| `AGENTMAIL_API_KEY` | — | AgentMail API key (alternative to config file) |
 
 ### Email Scheduling
 
