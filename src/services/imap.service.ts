@@ -1079,6 +1079,41 @@ export default class ImapService {
     return { email, mailbox: draftsPath };
   }
 
+  // -------------------------------------------------------------------------
+  // Save to Sent (called by SmtpService after successful SMTP send)
+  // -------------------------------------------------------------------------
+
+  /**
+   * APPEND a sent message to the account's Sent folder so it shows up in
+   * webmail / desktop clients (Thunderbird, Apple Mail, etc.).
+   *
+   * Auto-detects the Sent folder via the IMAP `\Sent` special-use flag, with
+   * fallbacks to common names. Throws if no Sent folder can be located.
+   */
+  async saveToSent(accountName: string, rawMessage: Buffer, date?: Date): Promise<void> {
+    const client = await this.connections.getImapClient(accountName);
+    const mailboxes = await client.list();
+
+    const bySpecialUse = mailboxes.find((mb) => mb.specialUse === '\\Sent');
+    let sentPath: string | undefined = bySpecialUse?.path;
+
+    if (!sentPath) {
+      const fallbacks = ['Sent', 'Sent Mail', 'Sent Items', 'INBOX.Sent', '[Gmail]/Sent Mail'];
+      const found = fallbacks.find((name) => mailboxes.some((mb) => mb.path === name));
+      if (found) sentPath = found;
+    }
+
+    if (!sentPath) {
+      throw new Error(
+        `Could not locate the Sent folder for account "${accountName}". ` +
+          `No mailbox advertised the \\Sent special-use flag and none of the ` +
+          `common names (Sent, [Gmail]/Sent Mail, INBOX.Sent, ...) were found.`,
+      );
+    }
+
+    await client.append(sentPath, rawMessage, ['\\Seen'], date);
+  }
+
   /** Delete a draft after it has been sent. */
   async deleteDraft(accountName: string, emailId: number, mailbox: string): Promise<void> {
     const client = await this.connections.getImapClient(accountName);

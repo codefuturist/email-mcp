@@ -117,6 +117,7 @@ function loadFromEnv(): RawAppConfig | null {
             max_messages: parseInt(process.env.MCP_EMAIL_SMTP_POOL_MAX_MESSAGES ?? '100', 10),
           },
         },
+        save_to_sent: process.env.MCP_EMAIL_SAVE_TO_SENT !== 'false',
       },
     ],
   };
@@ -179,6 +180,7 @@ function normalizeAccount(raw: RawAccountConfig): AccountConfig {
         maxMessages: raw.smtp.pool.max_messages,
       },
     },
+    saveToSent: raw.save_to_sent ?? true,
   };
 }
 
@@ -349,6 +351,8 @@ full_name = "Your Name"
 # username defaults to email if omitted
 # username = "you@example.com"
 password = "your-app-password"
+# save_to_sent = true  # (default) APPEND each sent message to the Sent folder
+                       # via IMAP so it shows in webmail / desktop clients.
 
 [accounts.imap]
 host = "imap.example.com"

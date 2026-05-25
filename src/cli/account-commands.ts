@@ -336,6 +336,7 @@ function buildTestAccount(
         maxMessages: server.smtpPoolMaxMessages,
       },
     },
+    saveToSent: true,
   };
 }
 
@@ -410,6 +411,7 @@ function buildRawAccount(
         max_messages: server.smtpPoolMaxMessages,
       },
     },
+    save_to_sent: true,
   };
 }
 

@@ -68,6 +68,13 @@ export interface AccountConfig {
   oauth2?: OAuth2Config;
   imap: ImapConfig;
   smtp: SmtpConfig;
+  /**
+   * When true (default), every successful SMTP send is followed by an IMAP
+   * APPEND of the same message into the account's Sent folder so that the
+   * message shows up in webmail / desktop clients (Thunderbird, Apple Mail).
+   * Configurable per-account via `save_to_sent` in the TOML config.
+   */
+  saveToSent: boolean;
 }
 
 export interface WatcherConfig {
