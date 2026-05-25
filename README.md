@@ -367,6 +367,8 @@ name = "personal"
 email = "you@gmail.com"
 full_name = "Your Name"
 password = "your-app-password"
+# save_to_sent = true  # (default) APPEND each sent message to the Sent folder
+                       # so it shows in webmail / Thunderbird / Apple Mail.
 
 [accounts.imap]
 host = "imap.gmail.com"

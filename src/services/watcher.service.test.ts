@@ -31,6 +31,7 @@ const testAccount: AccountConfig = {
   password: 'password',
   imap: { host: 'imap.example.com', port: 993, tls: true, starttls: false, verifySsl: true },
   smtp: { host: 'smtp.example.com', port: 465, tls: true, starttls: false, verifySsl: true },
+  saveToSent: true,
 };
 
 describe('WatcherService', () => {

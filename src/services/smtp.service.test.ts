@@ -13,7 +13,10 @@ function createMockTransport() {
   };
 }
 
-function createMockConnectionManager(mockTransport: ReturnType<typeof createMockTransport>) {
+function createMockConnectionManager(
+  mockTransport: ReturnType<typeof createMockTransport>,
+  accountOverrides: Record<string, unknown> = {},
+) {
   return {
     getAccount: vi.fn().mockReturnValue({
       name: 'test',
@@ -22,6 +25,8 @@ function createMockConnectionManager(mockTransport: ReturnType<typeof createMock
       username: 'test@example.com',
       imap: { host: 'imap.example.com', port: 993, tls: true, starttls: false, verifySsl: true },
       smtp: { host: 'smtp.example.com', port: 465, tls: true, starttls: false, verifySsl: true },
+      saveToSent: false,
+      ...accountOverrides,
     }),
     getAccountNames: vi.fn().mockReturnValue(['test']),
     getImapClient: vi.fn(),
@@ -37,8 +42,11 @@ function createMockRateLimiter(allowed = true) {
   } as unknown as RateLimiter;
 }
 
-function createMockImapService() {
-  return {} as unknown as ImapService;
+function createMockImapService(overrides: Partial<ImapService> = {}) {
+  return {
+    saveToSent: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as ImapService;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +131,73 @@ describe('SmtpService', () => {
       const call = transport.sendMail.mock.calls[0][0];
       expect(call.html).toBe('<h1>Hello</h1>');
       expect(call.text).toBeUndefined();
+    });
+
+    it('pins Message-ID and Date in the sendMail payload', async () => {
+      await service.sendEmail('test', {
+        to: ['a@example.com'],
+        subject: 'X',
+        body: 'Y',
+      });
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(typeof call.messageId).toBe('string');
+      expect(call.messageId).toMatch(/^<.+@.+>$/);
+      expect(call.date).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('save_to_sent', () => {
+    it('calls imapService.saveToSent when account.saveToSent is true', async () => {
+      const imapMock = createMockImapService();
+      connections = createMockConnectionManager(transport, { saveToSent: true });
+      service = new SmtpService(connections, rateLimiter, imapMock);
+
+      await service.sendEmail('test', {
+        to: ['a@example.com'],
+        subject: 'S',
+        body: 'B',
+      });
+
+      const saveToSent = (imapMock as any).saveToSent as ReturnType<typeof vi.fn>;
+      expect(saveToSent).toHaveBeenCalledTimes(1);
+      const [accountArg, rawArg, dateArg] = saveToSent.mock.calls[0];
+      expect(accountArg).toBe('test');
+      expect(Buffer.isBuffer(rawArg)).toBe(true);
+      expect((rawArg as Buffer).toString('utf-8')).toContain('Subject: S');
+      expect(dateArg).toBeInstanceOf(Date);
+    });
+
+    it('skips saveToSent when account.saveToSent is false', async () => {
+      // default mock already has saveToSent: false
+      const imapMock = createMockImapService();
+      service = new SmtpService(connections, rateLimiter, imapMock);
+
+      await service.sendEmail('test', {
+        to: ['a@example.com'],
+        subject: 'S',
+        body: 'B',
+      });
+
+      const saveToSent = (imapMock as any).saveToSent as ReturnType<typeof vi.fn>;
+      expect(saveToSent).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when saveToSent fails — send is best-effort', async () => {
+      const imapMock = createMockImapService({
+        saveToSent: vi.fn().mockRejectedValue(new Error('IMAP unreachable')),
+      } as unknown as Partial<ImapService>);
+      connections = createMockConnectionManager(transport, { saveToSent: true });
+      service = new SmtpService(connections, rateLimiter, imapMock);
+
+      // Silence the expected console.error
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await expect(
+        service.sendEmail('test', { to: ['a@example.com'], subject: 'S', body: 'B' }),
+      ).resolves.toMatchObject({ status: 'sent' });
+
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('IMAP unreachable'));
+      errSpy.mockRestore();
     });
   });
 });
