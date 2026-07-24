@@ -35,6 +35,36 @@ describe('resolveCredential', () => {
     });
   });
 
+  describe('command source', () => {
+    it('resolves from command stdout, trimming trailing newline', async () => {
+      const result = await resolveCredential('test', 'command:printf "cmd-password\\n"', undefined);
+      expect(result).toEqual({ password: 'cmd-password', source: 'command' });
+    });
+
+    it('supports pipes and quoting (runs in a shell)', async () => {
+      const result = await resolveCredential('test', "command:echo 'a b c' | tr -d ' '", undefined);
+      expect(result).toEqual({ password: 'abc', source: 'command' });
+    });
+
+    it('throws when the command produces no output', async () => {
+      await expect(resolveCredential('test', 'command:true', undefined)).rejects.toThrow(
+        /Credential command failed/,
+      );
+    });
+
+    it('throws when the command is empty', async () => {
+      await expect(resolveCredential('test', 'command:   ', undefined)).rejects.toThrow(
+        /Empty command/,
+      );
+    });
+
+    it('throws when the command exits non-zero', async () => {
+      await expect(resolveCredential('test', 'command:exit 3', undefined)).rejects.toThrow(
+        /Credential command failed/,
+      );
+    });
+  });
+
   describe('unknown source', () => {
     it('throws for unknown credential_source value', async () => {
       await expect(resolveCredential('test', 'something-else', undefined)).rejects.toThrow(

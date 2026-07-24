@@ -4,16 +4,19 @@
  * Resolves account passwords from multiple sources:
  * - "keychain"        → OS keychain (macOS Keychain, Linux libsecret)
  * - "env:VAR_NAME"    → environment variable
+ * - "command:CMD"     → run CMD in a shell, use its stdout as the password
+ *                       (subsumes pass, 1Password `op`, gpg, Vault, etc.)
  * - "plaintext"       → raw password from config file (deprecated, warns at runtime)
  *
  * When no credential_source is specified, falls back to the raw password field
  * in the config (treated as plaintext with a deprecation warning).
  */
 
-import { execFile as execFileCb } from 'node:child_process';
+import { exec as execCb, execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFile = promisify(execFileCb);
+const exec = promisify(execCb);
 
 const KEYCHAIN_SERVICE = 'email-mcp';
 
@@ -21,7 +24,7 @@ export type CredentialSource = string; // "keychain", "plaintext", or "env:VAR_N
 
 export interface CredentialResolution {
   password: string;
-  source: 'keychain' | 'env' | 'plaintext';
+  source: 'keychain' | 'env' | 'plaintext' | 'command';
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +82,36 @@ async function readFromKeychain(accountName: string): Promise<string> {
     `OS keychain is not supported on platform "${platform}". ` +
       `Use credential_source = "env:VAR_NAME" or "plaintext" instead.`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Command-based credential read (pass / 1Password / gpg / Vault / …)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a user-configured shell command and use its stdout as the password.
+ *
+ * The command comes from config, which is trusted input on the same footing as
+ * the code itself: anyone who can edit it can already run arbitrary code as this
+ * user. We therefore intentionally run it through a shell (like msmtp's
+ * `passwordeval` / mbsync's `PassCmd`) so pipes and quoting work, and we do NOT
+ * sandbox it — a command that echoes or exfiltrates is a configuration mistake,
+ * not a boundary this service can enforce.
+ *
+ * Failure modes: non-zero exit, timeout (10s), or empty stdout all throw.
+ */
+async function readFromCommand(command: string, accountName: string): Promise<string> {
+  try {
+    const { stdout } = await exec(command, { timeout: 10_000, windowsHide: true });
+    const password = stdout.trim();
+    if (!password) {
+      throw new Error('command produced no output');
+    }
+    return password;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Credential command failed for account "${accountName}": ${msg}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +204,15 @@ export async function resolveCredential(
     return { password, source: 'env' };
   }
 
+  if (source.startsWith('command:')) {
+    const command = source.slice('command:'.length).trim();
+    if (!command) {
+      throw new Error(`Empty command in credential_source for account "${accountName}".`);
+    }
+    const password = await readFromCommand(command, accountName);
+    return { password, source: 'command' };
+  }
+
   if (source === 'plaintext') {
     if (!rawPassword) {
       throw new Error(
@@ -183,7 +225,7 @@ export async function resolveCredential(
 
   throw new Error(
     `Unknown credential_source "${source}" for account "${accountName}". ` +
-      `Expected "keychain", "env:VAR_NAME", or "plaintext".`,
+      `Expected "keychain", "env:VAR_NAME", "command:CMD", or "plaintext".`,
   );
 }
 
