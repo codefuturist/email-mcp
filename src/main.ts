@@ -38,6 +38,13 @@ import TemplateService from './services/template.service.js';
 import WatcherService from './services/watcher.service.js';
 import registerAllTools from './tools/register.js';
 
+/**
+ * How long a graceful shutdown may take before the process is forced down.
+ * Bounds the two goodbye round trips (SMTP QUIT, IMAP LOGOUT) over a slow WAN;
+ * past that, dropping the sockets beats leaking the process we are shutting down.
+ */
+const SHUTDOWN_GRACE_MS = 5_000;
+
 const HELP = `
 email-mcp — Email MCP Server (IMAP + SMTP)
 
@@ -128,6 +135,7 @@ async function runServer(): Promise<void> {
   // --------------------------------------------------------------------------
 
   let schedulerInterval: ReturnType<typeof setInterval> | undefined;
+  let shuttingDown = false;
 
   const lowLevelServer = server.server;
 
@@ -142,6 +150,14 @@ async function runServer(): Promise<void> {
 
         await watcherService.start();
 
+        // Same reason as the guard below, but this await is the wider window: a
+        // watcher that finishes starting after shutdown holds IDLE sockets that
+        // the already-completed stop() never saw. stop() is idempotent.
+        if (shuttingDown) {
+          await watcherService.stop();
+          return;
+        }
+
         await mcpLog('info', 'server', 'Email MCP server started');
 
         // Check for overdue scheduled emails on startup
@@ -153,6 +169,12 @@ async function runServer(): Promise<void> {
         } catch {
           // Non-fatal: scheduler check failure shouldn't prevent server start
         }
+
+        // A client can vanish mid-startup — reconnect storms do it routinely, and
+        // this block sits behind two awaits. Arming the tick after shutdown already
+        // ran would leave a ref'd handle nothing clears: the very orphan the
+        // shutdown path below exists to prevent.
+        if (shuttingDown) return;
 
         // Periodic scheduler check every 60 seconds
         schedulerInterval = setInterval(async () => {
@@ -172,7 +194,35 @@ async function runServer(): Promise<void> {
   };
 
   // Graceful shutdown
-  const shutdown = async () => {
+  //
+  // The spec puts shutdown on the client: over stdio it SHOULD initiate it by
+  // "first, closing the input stream to the child process (the server)", then
+  // "waiting for the server to exit" before escalating to SIGTERM and SIGKILL
+  // (MCP basic/lifecycle, Shutdown). So EOF is the primary signal, not a
+  // fallback — and the only one that survives a SIGKILLed client, since the
+  // kernel closes the pipe either way, and the only one Windows has, lacking
+  // POSIX signals. StdioServerTransport subscribes to 'data' and 'error' only,
+  // so nothing observes EOF unless we listen for it here. Skipping that leaks an
+  // immortal process on every client death that misses SIGTERM: the services
+  // below hold ref'd handles (scheduler tick, hooks rate-limit timer, IMAP IDLE
+  // sockets), so the event loop never drains by itself.
+  const shutdown = async (reason: string) => {
+    // EOF, 'close' and a signal routinely arrive together.
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    // A hung QUIT/LOGOUT must not resurrect the orphan this exists to prevent.
+    // The valve is unref'd or it becomes the handle it was meant to release.
+    setTimeout(() => {
+      process.stderr.write(`[email-mcp] shutdown (${reason}) timed out — forcing exit\n`);
+      // `process.exitCode` is the house style, but it only takes effect once the
+      // loop drains, and a hung shutdown is exactly the case where it will not.
+      // Throwing would surface as an uncaught exception from a timer rather than
+      // a stop. Forcing the exit is what this valve is for.
+      // eslint-disable-next-line n/no-process-exit
+      process.exit(1);
+    }, SHUTDOWN_GRACE_MS).unref();
+
     if (schedulerInterval) clearInterval(schedulerInterval);
     hooksService.stop();
     await watcherService.stop();
@@ -180,8 +230,19 @@ async function runServer(): Promise<void> {
     await server.close();
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  // eslint-disable-next-line no-void
+  const requestShutdown = (reason: string): void => void shutdown(reason);
+
+  // Listening for 'data' here would switch stdin to flowing mode and eat protocol
+  // bytes from under the SDK; 'end'/'close' leave the stream's mode untouched.
+  process.stdin.once('end', () => requestShutdown('stdin EOF'));
+  process.stdin.once('close', () => requestShutdown('stdin closed'));
+  // Redundant while the SDK never fires it, and the idiomatic path once it does.
+  transport.onclose = () => requestShutdown('transport closed');
+
+  process.on('SIGINT', requestShutdown);
+  process.on('SIGTERM', requestShutdown);
+  process.on('SIGHUP', requestShutdown);
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
