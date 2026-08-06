@@ -150,6 +150,14 @@ async function runServer(): Promise<void> {
 
         await watcherService.start();
 
+        // Same reason as the guard below, but this await is the wider window: a
+        // watcher that finishes starting after shutdown holds IDLE sockets that
+        // the already-completed stop() never saw. stop() is idempotent.
+        if (shuttingDown) {
+          await watcherService.stop();
+          return;
+        }
+
         await mcpLog('info', 'server', 'Email MCP server started');
 
         // Check for overdue scheduled emails on startup
@@ -187,9 +195,12 @@ async function runServer(): Promise<void> {
 
   // Graceful shutdown
   //
-  // Per the MCP stdio lifecycle the client shuts us down by closing our stdin,
-  // and EOF is the only death signal that survives a SIGKILLed client — the
-  // kernel closes the pipe either way — and the only one Windows has, lacking
+  // The spec puts shutdown on the client: over stdio it SHOULD initiate it by
+  // "first, closing the input stream to the child process (the server)", then
+  // "waiting for the server to exit" before escalating to SIGTERM and SIGKILL
+  // (MCP basic/lifecycle, Shutdown). So EOF is the primary signal, not a
+  // fallback — and the only one that survives a SIGKILLed client, since the
+  // kernel closes the pipe either way, and the only one Windows has, lacking
   // POSIX signals. StdioServerTransport subscribes to 'data' and 'error' only,
   // so nothing observes EOF unless we listen for it here. Skipping that leaks an
   // immortal process on every client death that misses SIGTERM: the services
