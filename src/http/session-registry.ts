@@ -104,7 +104,9 @@ export default class SessionRegistry<T extends ClosableSession> {
 
   async closeAll(): Promise<void> {
     const sessionIds = [...this.sessions.keys()];
-    await Promise.allSettled(sessionIds.map(async (sessionId) => this.closeSession(sessionId, true)));
+    await Promise.allSettled(
+      sessionIds.map(async (sessionId) => this.closeSession(sessionId, true)),
+    );
   }
 
   private async closeSession(sessionId: string, includeActive = false): Promise<boolean> {
