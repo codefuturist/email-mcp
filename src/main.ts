@@ -37,6 +37,7 @@ import SmtpService from './services/smtp.service.js';
 import TemplateService from './services/template.service.js';
 import WatcherService from './services/watcher.service.js';
 import registerAllTools from './tools/register.js';
+import SessionRegistry from './http/session-registry.js';
 
 const HELP = `
 email-mcp — Email MCP Server (IMAP + SMTP)
@@ -64,7 +65,7 @@ Examples:
   email-mcp account add              # Add a new email account
   email-mcp account edit personal    # Edit an account
   email-mcp account delete work      # Delete an account
-  email-mcp setup                    # Alias for account add
+  email-mcp setup                    # Alias for 'account add'
   email-mcp test                     # Test all accounts
   email-mcp test personal            # Test specific account
   email-mcp install                  # Register with detected MCP clients
@@ -78,11 +79,10 @@ Examples:
   email-mcp scheduler install        # Install OS periodic check
   email-mcp notify test              # Send a test notification
   email-mcp notify status            # Check notification platform support
-`.trim();
+`;
 
-async function runServer(): Promise<void> {
+async function createServices() {
   const config = await loadConfig();
-
   const oauthService = new OAuthService();
   const connections = new ConnectionManager(config.accounts, oauthService);
   const rateLimiter = new RateLimiter(config.settings.rateLimit);
@@ -96,9 +96,37 @@ async function runServer(): Promise<void> {
   const watcherService = new WatcherService(config.settings.watcher, config.accounts);
   const hooksService = new HooksService(config.settings.hooks, imapService);
 
+  return {
+    config,
+    connections,
+    imapService,
+    smtpService,
+    templateService,
+    calendarService,
+    localCalendarService,
+    remindersService,
+    schedulerService,
+    watcherService,
+    hooksService,
+  };
+}
+
+async function runServer(): Promise<void> {
+  const {
+    config,
+    connections,
+    imapService,
+    smtpService,
+    templateService,
+    calendarService,
+    localCalendarService,
+    remindersService,
+    schedulerService,
+    watcherService,
+    hooksService,
+  } = await createServices();
   const server = createServer();
   bindServer(server);
-
   registerAllTools(
     server,
     connections,
@@ -115,100 +143,73 @@ async function runServer(): Promise<void> {
   );
   registerAllResources(server, connections, imapService, templateService, schedulerService);
   registerAllPrompts(server);
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // --- Post-handshake initialization ----------------------------------------
-  // Everything below is deferred until the client completes the MCP
-  // `initialize` / `initialized` handshake.  This prevents notifications
-  // from being written to stdout before the client is ready, which would
-  // crash clients like Vibe, and ensures `getClientCapabilities()` returns
-  // the real capabilities (including `sampling` support).
-  // --------------------------------------------------------------------------
-
-  let schedulerInterval: ReturnType<typeof setInterval> | undefined;
-
-  const lowLevelServer = server.server;
-
-  lowLevelServer.oninitialized = () => {
+  const ls = server.server;
+  ls.oninitialized = () => {
     markInitialized();
-
-    // eslint-disable-next-line no-void
-    void (async () => {
-      try {
-        const clientCaps = lowLevelServer.getClientCapabilities?.() ?? {};
-        hooksService.start(lowLevelServer, { sampling: clientCaps.sampling != null });
-
-        await watcherService.start();
-
-        await mcpLog('info', 'server', 'Email MCP server started');
-
-        // Check for overdue scheduled emails on startup
-        try {
-          const result = await schedulerService.checkAndSend();
-          if (result.sent > 0) {
-            await mcpLog('info', 'scheduler', `Sent ${result.sent} overdue email(s) on startup`);
-          }
-        } catch {
-          // Non-fatal: scheduler check failure shouldn't prevent server start
-        }
-
-        // Periodic scheduler check every 60 seconds
-        schedulerInterval = setInterval(async () => {
-          try {
-            await schedulerService.checkAndSend();
-          } catch {
-            // Silent — don't spam logs
-          }
-        }, 60_000);
-      } catch (err) {
-        // Log to stderr — mcpLog may not be safe if init itself errored
-        process.stderr.write(
-          `[email-mcp] post-init error: ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-    })();
+    try {
+      const clientCaps = ls.getClientCapabilities?.() ?? {};
+      hooksService.start(ls, { sampling: clientCaps.sampling != null });
+    } catch {
+      // Ignore hooks setup failures so stdio still serves tools.
+    }
   };
 
-  // Graceful shutdown
-  const shutdown = async () => {
+  let schedulerInterval: ReturnType<typeof setInterval> | undefined;
+  try {
+    await watcherService.start();
+    try {
+      const result = await schedulerService.checkAndSend();
+      if (result.sent > 0) {
+        await mcpLog('info', 'scheduler', `Sent ${result.sent} overdue email(s) on startup`);
+      }
+    } catch {
+      // Non-fatal: scheduler check failure shouldn't prevent server start
+    }
+    // Periodic scheduler check every 60 seconds
+    schedulerInterval = setInterval(async () => {
+      try {
+        await schedulerService.checkAndSend();
+      } catch {
+        // Silent
+      }
+    }, 60_000);
+
+    await mcpLog('info', 'server', 'Email MCP server ready');
+    await new Promise<void>(() => {});
+  } finally {
     if (schedulerInterval) clearInterval(schedulerInterval);
     hooksService.stop();
     await watcherService.stop();
     await connections.closeAll();
     await server.close();
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  }
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 async function runHttpServer(port: number): Promise<void> {
-  const config = await loadConfig();
-
-  // Shared services — created once for the process lifetime
-  const oauthService = new OAuthService();
-  const connections = new ConnectionManager(config.accounts, oauthService);
-  const rateLimiter = new RateLimiter(config.settings.rateLimit);
-  const imapService = new ImapService(connections);
-  const smtpService = new SmtpService(connections, rateLimiter, imapService);
-  const templateService = new TemplateService();
-  const calendarService = new CalendarService();
-  const localCalendarService = new LocalCalendarService();
-  const remindersService = new RemindersService();
-  const schedulerService = new SchedulerService(smtpService, imapService);
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
-  const hooksService = new HooksService(config.settings.hooks, imapService);
+  const {
+    config,
+    connections,
+    imapService,
+    smtpService,
+    templateService,
+    calendarService,
+    localCalendarService,
+    remindersService,
+    schedulerService,
+    watcherService,
+    hooksService,
+  } = await createServices();
 
   // Per-session factory: tools share service instances but each MCP session
   // needs its own McpServer because the SDK binds one transport per server.
@@ -234,7 +235,12 @@ async function runHttpServer(port: number): Promise<void> {
     return server;
   }
 
-  const transports = new Map<string, StreamableHTTPServerTransport>();
+  const sessionIdleTtlMs = 30 * 60_000;
+  const maxHttpSessions = 32;
+  const sessionRegistry = new SessionRegistry<StreamableHTTPServerTransport>({
+    idleTtlMs: sessionIdleTtlMs,
+    maxSessions: maxHttpSessions,
+  });
 
   const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.url === '/health') {
@@ -273,19 +279,32 @@ async function runHttpServer(port: number): Promise<void> {
     const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
     let transport: StreamableHTTPServerTransport;
 
-    const existing = sessionId ? transports.get(sessionId) : undefined;
+    const existing = sessionId ? sessionRegistry.acquire(sessionId) : undefined;
+    let acquiredSessionId = existing ? sessionId : undefined;
     if (existing) {
       transport = existing;
     } else if (!sessionId && req.method === 'POST' && isInitializeRequest(body)) {
+      if (!(await sessionRegistry.ensureCapacity())) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32000, message: 'Server busy: too many active MCP sessions' },
+            id: null,
+          }),
+        );
+        return;
+      }
       const newTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (sid) => {
-          transports.set(sid, newTransport);
+          sessionRegistry.add(sid, newTransport, 1);
+          acquiredSessionId = sid;
         },
       });
       newTransport.onclose = () => {
         const sid = newTransport.sessionId;
-        if (sid) transports.delete(sid);
+        if (sid) sessionRegistry.remove(sid, newTransport);
       };
       const mcpServer = buildMcpSession();
       await mcpServer.connect(newTransport);
@@ -326,10 +345,19 @@ async function runHttpServer(port: number): Promise<void> {
       return;
     }
 
-    await transport.handleRequest(req, res, body);
+    try {
+      await transport.handleRequest(req, res, body);
+    } finally {
+      if (acquiredSessionId) sessionRegistry.release(acquiredSessionId);
+    }
   });
 
   await watcherService.start();
+
+  const sessionCleanupInterval = setInterval(() => {
+    // eslint-disable-next-line no-void
+    void sessionRegistry.pruneIdle();
+  }, 60_000);
 
   const checkInterval = setInterval(async () => {
     try {
@@ -360,10 +388,10 @@ async function runHttpServer(port: number): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(checkInterval);
+    clearInterval(sessionCleanupInterval);
     hooksService.stop();
     await watcherService.stop();
-    // Close all transports concurrently; errors are ignored individually.
-    await Promise.allSettled(Array.from(transports.values(), async (t) => t.close()));
+    await sessionRegistry.closeAll();
     await connections.closeAll();
     httpServer.close();
   };
@@ -391,15 +419,15 @@ async function main(): Promise<void> {
       break;
     }
 
-    case 'setup': {
-      const { default: runSetup } = await import('./cli/setup.js');
-      await runSetup();
+    case 'account': {
+      const { default: runAccountCommand } = await import('./cli/account-commands.js');
+      await runAccountCommand(process.argv[3], process.argv.slice(4));
       break;
     }
 
-    case 'account': {
-      const { default: runAccountCommand } = await import('./cli/account-commands.js');
-      await runAccountCommand(process.argv[3], process.argv[4]);
+    case 'setup': {
+      const { default: runSetup } = await import('./cli/setup.js');
+      await runSetup();
       break;
     }
 
