@@ -21,6 +21,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { loadConfig } from './config/loader.js';
 import ConnectionManager from './connections/manager.js';
+import SessionRegistry from './http/session-registry.js';
 import { bindServer, markInitialized, mcpLog } from './logging.js';
 import registerAllPrompts from './prompts/register.js';
 import registerAllResources from './resources/register.js';
@@ -234,7 +235,12 @@ async function runHttpServer(port: number): Promise<void> {
     return server;
   }
 
-  const transports = new Map<string, StreamableHTTPServerTransport>();
+  const sessionIdleTtlMs = 30 * 60_000;
+  const maxHttpSessions = 32;
+  const sessionRegistry = new SessionRegistry<StreamableHTTPServerTransport>({
+    idleTtlMs: sessionIdleTtlMs,
+    maxSessions: maxHttpSessions,
+  });
 
   const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.url === '/health') {
@@ -273,19 +279,32 @@ async function runHttpServer(port: number): Promise<void> {
     const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
     let transport: StreamableHTTPServerTransport;
 
-    const existing = sessionId ? transports.get(sessionId) : undefined;
+    const existing = sessionId ? sessionRegistry.acquire(sessionId) : undefined;
+    let acquiredSessionId = existing ? sessionId : undefined;
     if (existing) {
       transport = existing;
     } else if (!sessionId && req.method === 'POST' && isInitializeRequest(body)) {
+      if (!(await sessionRegistry.ensureCapacity())) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32000, message: 'Server busy: too many active MCP sessions' },
+            id: null,
+          }),
+        );
+        return;
+      }
       const newTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (sid) => {
-          transports.set(sid, newTransport);
+          sessionRegistry.add(sid, newTransport, 1);
+          acquiredSessionId = sid;
         },
       });
       newTransport.onclose = () => {
         const sid = newTransport.sessionId;
-        if (sid) transports.delete(sid);
+        if (sid) sessionRegistry.remove(sid, newTransport);
       };
       const mcpServer = buildMcpSession();
       await mcpServer.connect(newTransport);
@@ -326,10 +345,19 @@ async function runHttpServer(port: number): Promise<void> {
       return;
     }
 
-    await transport.handleRequest(req, res, body);
+    try {
+      await transport.handleRequest(req, res, body);
+    } finally {
+      if (acquiredSessionId) sessionRegistry.release(acquiredSessionId);
+    }
   });
 
   await watcherService.start();
+
+  const sessionCleanupInterval = setInterval(() => {
+    // eslint-disable-next-line no-void
+    void sessionRegistry.pruneIdle();
+  }, 60_000);
 
   const checkInterval = setInterval(async () => {
     try {
@@ -360,10 +388,10 @@ async function runHttpServer(port: number): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(checkInterval);
+    clearInterval(sessionCleanupInterval);
     hooksService.stop();
     await watcherService.stop();
-    // Close all transports concurrently; errors are ignored individually.
-    await Promise.allSettled(Array.from(transports.values(), async (t) => t.close()));
+    await sessionRegistry.closeAll();
     await connections.closeAll();
     httpServer.close();
   };
