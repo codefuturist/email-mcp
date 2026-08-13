@@ -21,6 +21,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { loadConfig } from './config/loader.js';
 import ConnectionManager from './connections/manager.js';
+import SessionRegistry from './http/session-registry.js';
 import { bindServer, markInitialized, mcpLog } from './logging.js';
 import registerAllPrompts from './prompts/register.js';
 import registerAllResources from './resources/register.js';
@@ -37,7 +38,6 @@ import SmtpService from './services/smtp.service.js';
 import TemplateService from './services/template.service.js';
 import WatcherService from './services/watcher.service.js';
 import registerAllTools from './tools/register.js';
-import SessionRegistry from './http/session-registry.js';
 
 const HELP = `
 email-mcp — Email MCP Server (IMAP + SMTP)
@@ -65,7 +65,7 @@ Examples:
   email-mcp account add              # Add a new email account
   email-mcp account edit personal    # Edit an account
   email-mcp account delete work      # Delete an account
-  email-mcp setup                    # Alias for 'account add'
+  email-mcp setup                    # Alias for account add
   email-mcp test                     # Test all accounts
   email-mcp test personal            # Test specific account
   email-mcp install                  # Register with detected MCP clients
@@ -79,10 +79,11 @@ Examples:
   email-mcp scheduler install        # Install OS periodic check
   email-mcp notify test              # Send a test notification
   email-mcp notify status            # Check notification platform support
-`;
+`.trim();
 
-async function createServices() {
+async function runServer(): Promise<void> {
   const config = await loadConfig();
+
   const oauthService = new OAuthService();
   const connections = new ConnectionManager(config.accounts, oauthService);
   const rateLimiter = new RateLimiter(config.settings.rateLimit);
@@ -96,37 +97,9 @@ async function createServices() {
   const watcherService = new WatcherService(config.settings.watcher, config.accounts);
   const hooksService = new HooksService(config.settings.hooks, imapService);
 
-  return {
-    config,
-    connections,
-    imapService,
-    smtpService,
-    templateService,
-    calendarService,
-    localCalendarService,
-    remindersService,
-    schedulerService,
-    watcherService,
-    hooksService,
-  };
-}
-
-async function runServer(): Promise<void> {
-  const {
-    config,
-    connections,
-    imapService,
-    smtpService,
-    templateService,
-    calendarService,
-    localCalendarService,
-    remindersService,
-    schedulerService,
-    watcherService,
-    hooksService,
-  } = await createServices();
   const server = createServer();
   bindServer(server);
+
   registerAllTools(
     server,
     connections,
@@ -143,73 +116,100 @@ async function runServer(): Promise<void> {
   );
   registerAllResources(server, connections, imapService, templateService, schedulerService);
   registerAllPrompts(server);
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  const ls = server.server;
-  ls.oninitialized = () => {
-    markInitialized();
-    try {
-      const clientCaps = ls.getClientCapabilities?.() ?? {};
-      hooksService.start(ls, { sampling: clientCaps.sampling != null });
-    } catch {
-      // Ignore hooks setup failures so stdio still serves tools.
-    }
-  };
+  // --- Post-handshake initialization ----------------------------------------
+  // Everything below is deferred until the client completes the MCP
+  // `initialize` / `initialized` handshake.  This prevents notifications
+  // from being written to stdout before the client is ready, which would
+  // crash clients like Vibe, and ensures `getClientCapabilities()` returns
+  // the real capabilities (including `sampling` support).
+  // --------------------------------------------------------------------------
 
   let schedulerInterval: ReturnType<typeof setInterval> | undefined;
-  try {
-    await watcherService.start();
-    try {
-      const result = await schedulerService.checkAndSend();
-      if (result.sent > 0) {
-        await mcpLog('info', 'scheduler', `Sent ${result.sent} overdue email(s) on startup`);
-      }
-    } catch {
-      // Non-fatal: scheduler check failure shouldn't prevent server start
-    }
-    // Periodic scheduler check every 60 seconds
-    schedulerInterval = setInterval(async () => {
-      try {
-        await schedulerService.checkAndSend();
-      } catch {
-        // Silent
-      }
-    }, 60_000);
 
-    await mcpLog('info', 'server', 'Email MCP server ready');
-    await new Promise<void>(() => {});
-  } finally {
+  const lowLevelServer = server.server;
+
+  lowLevelServer.oninitialized = () => {
+    markInitialized();
+
+    // eslint-disable-next-line no-void
+    void (async () => {
+      try {
+        const clientCaps = lowLevelServer.getClientCapabilities?.() ?? {};
+        hooksService.start(lowLevelServer, { sampling: clientCaps.sampling != null });
+
+        await watcherService.start();
+
+        await mcpLog('info', 'server', 'Email MCP server started');
+
+        // Check for overdue scheduled emails on startup
+        try {
+          const result = await schedulerService.checkAndSend();
+          if (result.sent > 0) {
+            await mcpLog('info', 'scheduler', `Sent ${result.sent} overdue email(s) on startup`);
+          }
+        } catch {
+          // Non-fatal: scheduler check failure shouldn't prevent server start
+        }
+
+        // Periodic scheduler check every 60 seconds
+        schedulerInterval = setInterval(async () => {
+          try {
+            await schedulerService.checkAndSend();
+          } catch {
+            // Silent — don't spam logs
+          }
+        }, 60_000);
+      } catch (err) {
+        // Log to stderr — mcpLog may not be safe if init itself errored
+        process.stderr.write(
+          `[email-mcp] post-init error: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    })();
+  };
+
+  // Graceful shutdown
+  const shutdown = async () => {
     if (schedulerInterval) clearInterval(schedulerInterval);
     hooksService.stop();
     await watcherService.stop();
     await connections.closeAll();
     await server.close();
-  }
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
 }
 
 async function runHttpServer(port: number): Promise<void> {
-  const {
-    config,
-    connections,
-    imapService,
-    smtpService,
-    templateService,
-    calendarService,
-    localCalendarService,
-    remindersService,
-    schedulerService,
-    watcherService,
-    hooksService,
-  } = await createServices();
+  const config = await loadConfig();
+
+  // Shared services — created once for the process lifetime
+  const oauthService = new OAuthService();
+  const connections = new ConnectionManager(config.accounts, oauthService);
+  const rateLimiter = new RateLimiter(config.settings.rateLimit);
+  const imapService = new ImapService(connections);
+  const smtpService = new SmtpService(connections, rateLimiter, imapService);
+  const templateService = new TemplateService();
+  const calendarService = new CalendarService();
+  const localCalendarService = new LocalCalendarService();
+  const remindersService = new RemindersService();
+  const schedulerService = new SchedulerService(smtpService, imapService);
+  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
+  const hooksService = new HooksService(config.settings.hooks, imapService);
 
   // Per-session factory: tools share service instances but each MCP session
   // needs its own McpServer because the SDK binds one transport per server.
@@ -419,15 +419,15 @@ async function main(): Promise<void> {
       break;
     }
 
-    case 'account': {
-      const { default: runAccountCommand } = await import('./cli/account-commands.js');
-      await runAccountCommand(process.argv[3], process.argv.slice(4));
-      break;
-    }
-
     case 'setup': {
       const { default: runSetup } = await import('./cli/setup.js');
       await runSetup();
+      break;
+    }
+
+    case 'account': {
+      const { default: runAccountCommand } = await import('./cli/account-commands.js');
+      await runAccountCommand(process.argv[3], process.argv[4]);
       break;
     }
 
