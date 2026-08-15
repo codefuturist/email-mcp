@@ -115,9 +115,16 @@ export const HooksConfigSchema = z.object({
   calendar_confirm: z.boolean().default(true),
 });
 
+export const AttachmentDownloadConfigSchema = z.object({
+  dir: z.string().min(1).optional(),
+  allowed_extensions: z.array(z.string().min(1)).optional(),
+  max_bytes: z.number().int().min(1).optional(),
+});
+
 export const SettingsSchema = z.object({
   rate_limit: z.number().int().min(1).default(10),
   read_only: z.boolean().default(false),
+  attachment_download: AttachmentDownloadConfigSchema.optional(),
   watcher: WatcherConfigSchema.default({
     enabled: false,
     folders: ['INBOX'],

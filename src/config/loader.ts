@@ -8,10 +8,59 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
-import type { AccountConfig, AppConfig, HookRule, OAuth2Config } from '../types/index.js';
+import {
+  DEFAULT_ATTACHMENT_DOWNLOAD_ALLOWED_EXTENSIONS,
+  DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES,
+  parseExtensionAllowlist,
+} from '../safety/attachment-download.js';
+import type {
+  AccountConfig,
+  AppConfig,
+  AttachmentDownloadConfig,
+  HookRule,
+  OAuth2Config,
+} from '../types/index.js';
 import type { RawAccountConfig, RawAppConfig } from './schema.js';
 import { AppConfigFileSchema } from './schema.js';
 import { CONFIG_FILE, xdg } from './xdg.js';
+
+// ---------------------------------------------------------------------------
+// Attachment download dir env helpers (also overlay onto TOML-loaded config)
+// ---------------------------------------------------------------------------
+
+function readAttachmentDownloadDirFromEnv(): string | undefined {
+  const value =
+    process.env.MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR ?? process.env.EMAIL_ATTACHMENT_DOWNLOAD_DIR;
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function attachmentDownloadFromEnvOrRaw(
+  raw: RawAppConfig['settings']['attachment_download'] | undefined,
+): AttachmentDownloadConfig {
+  const dir = readAttachmentDownloadDirFromEnv() ?? raw?.dir;
+  const envExt = process.env.MCP_EMAIL_ATTACHMENT_DOWNLOAD_ALLOWED_EXTENSIONS;
+  let allowedExtensions: string[];
+  if (envExt !== undefined) {
+    allowedExtensions = parseExtensionAllowlist(envExt);
+  } else if (raw?.allowed_extensions !== undefined) {
+    allowedExtensions = raw.allowed_extensions.map((e) => e.toLowerCase().replace(/^\./, ''));
+  } else {
+    allowedExtensions = [...DEFAULT_ATTACHMENT_DOWNLOAD_ALLOWED_EXTENSIONS];
+  }
+  const envMax = process.env.MCP_EMAIL_ATTACHMENT_DOWNLOAD_MAX_BYTES;
+  const maxBytes =
+    envMax !== undefined
+      ? parseInt(envMax, 10)
+      : (raw?.max_bytes ?? DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES);
+
+  return {
+    dir,
+    allowedExtensions,
+    maxBytes:
+      Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Environment variable loader (single-account quick setup)
@@ -46,6 +95,17 @@ function loadFromEnv(): RawAppConfig | null {
     settings: {
       rate_limit: parseInt(process.env.MCP_EMAIL_RATE_LIMIT ?? '10', 10),
       read_only: process.env.MCP_EMAIL_READ_ONLY === 'true',
+      attachment_download: {
+        dir: readAttachmentDownloadDirFromEnv(),
+        allowed_extensions: parseExtensionAllowlist(
+          process.env.MCP_EMAIL_ATTACHMENT_DOWNLOAD_ALLOWED_EXTENSIONS,
+        ),
+        max_bytes: parseInt(
+          process.env.MCP_EMAIL_ATTACHMENT_DOWNLOAD_MAX_BYTES ??
+            String(DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES),
+          10,
+        ),
+      },
       watcher: {
         enabled: process.env.MCP_EMAIL_WATCHER_ENABLED === 'true',
         folders: (process.env.MCP_EMAIL_WATCHER_FOLDERS ?? 'INBOX')
@@ -210,6 +270,7 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
     settings: {
       rateLimit: raw.settings.rate_limit,
       readOnly: raw.settings.read_only,
+      attachmentDownload: attachmentDownloadFromEnvOrRaw(raw.settings.attachment_download),
       watcher: {
         enabled: raw.settings.watcher.enabled,
         folders: raw.settings.watcher.folders,
@@ -309,6 +370,12 @@ export function generateTemplate(): string {
 [settings]
 rate_limit = 10  # max emails per minute per account
 read_only = false  # set to true to disable all write operations
+
+# Optional attachment download dir (also: MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR)
+# [settings.attachment_download]
+# dir = "/workspace/paperless"
+# allowed_extensions = ["pdf", "png", "jpg", "jpeg", "webp", "tiff", "txt", "md", "doc", "docx", "odt", "xls", "xlsx", "csv"]
+# max_bytes = 26214400
 
 # [settings.watcher]
 # enabled = false        # enable IMAP IDLE real-time monitoring

@@ -57,7 +57,7 @@ export default function registerAllTools(
   registerAccountsTools(server, connections);
   registerMailboxesTools(server, imapService);
   registerEmailsTools(server, imapService);
-  registerAttachmentTools(server, imapService);
+  registerAttachmentTools(server, imapService, config);
   registerContactsTools(server, imapService);
   registerThreadTools(server, imapService);
   registerTemplateReadTools(server, templateService);

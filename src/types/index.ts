@@ -137,12 +137,22 @@ export interface HooksConfig {
   calendarConfirm?: boolean;
 }
 
+export interface AttachmentDownloadConfig {
+  /** Absolute directory for attachment downloads. Unset disables save_to_download_dir. */
+  dir?: string;
+  /** Allowed file extensions (lowercase, no leading dot). */
+  allowedExtensions: string[];
+  /** Max attachment size for download-dir writes. */
+  maxBytes: number;
+}
+
 export interface AppConfig {
   settings: {
     rateLimit: number;
     readOnly: boolean;
     watcher: WatcherConfig;
     hooks: HooksConfig;
+    attachmentDownload: AttachmentDownloadConfig;
   };
   accounts: AccountConfig[];
 }

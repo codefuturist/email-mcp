@@ -53,7 +53,18 @@ async function showConfig(): Promise<void> {
   console.log(`Config file: ${CONFIG_FILE}\n`);
   console.log(`[settings]`);
   console.log(`  rate_limit = ${config.settings.rateLimit}`);
-  console.log(`  read_only  = ${config.settings.readOnly}\n`);
+  console.log(`  read_only  = ${config.settings.readOnly}`);
+  const { attachmentDownload } = config.settings;
+  if (attachmentDownload.dir) {
+    console.log(`  attachment_download.dir = ${attachmentDownload.dir}`);
+    console.log(
+      `  attachment_download.allowed_extensions = ${attachmentDownload.allowedExtensions.join(',')}`,
+    );
+    console.log(`  attachment_download.max_bytes = ${attachmentDownload.maxBytes}`);
+  } else {
+    console.log(`  attachment_download.dir = (unset)`);
+  }
+  console.log('');
 
   config.accounts.forEach((account) => {
     console.log(`[accounts.${account.name}]`);

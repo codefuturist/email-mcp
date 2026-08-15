@@ -35,10 +35,12 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 
-# Create config directory for volume mount
-RUN mkdir -p /home/node/.config/email-mcp && chown -R node:node /home/node/.config
+# Create config directory for volume mount and default attachment download path
+RUN mkdir -p /home/node/.config/email-mcp /workspace/paperless \
+  && chown -R node:node /home/node/.config /workspace/paperless
 
 ENV NODE_ENV=production
+ENV MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR=/workspace/paperless
 
 USER node
 

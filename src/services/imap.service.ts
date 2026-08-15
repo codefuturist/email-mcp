@@ -6,6 +6,13 @@
 
 import type { ImapFlow } from 'imapflow';
 import type { IConnectionManager } from '../connections/types.js';
+import {
+  assertAllowedExtension,
+  assertSafeDownloadBasename,
+  resolveAttachmentDownloadPath,
+  sanitizeAttachmentBasename,
+  writeDownloadFileAtomic,
+} from '../safety/attachment-download.js';
 import { sanitizeMailboxName, sanitizeSearchQuery } from '../safety/validation.js';
 import type {
   AttachmentMeta,
@@ -1125,6 +1132,36 @@ export default class ImapService {
     size: number;
     contentBase64: string;
   }> {
+    const result = await this.downloadAttachmentBuffer(
+      accountName,
+      emailId,
+      mailbox,
+      filename,
+      maxSizeBytes,
+    );
+    return {
+      filename: result.filename,
+      mimeType: result.mimeType,
+      size: result.size,
+      contentBase64: result.content.toString('base64'),
+    };
+  }
+
+  /**
+   * Download an attachment as a Buffer (no base64 encoding).
+   */
+  async downloadAttachmentBuffer(
+    accountName: string,
+    emailId: string,
+    mailbox: string,
+    filename: string,
+    maxSizeBytes = 5 * 1024 * 1024,
+  ): Promise<{
+    filename: string;
+    mimeType: string;
+    size: number;
+    content: Buffer;
+  }> {
     const client = await this.connections.getImapClient(accountName);
     const uid = parseInt(emailId, 10);
 
@@ -1181,11 +1218,56 @@ export default class ImapService {
         filename: attachment.filename,
         mimeType: attachment.mimeType,
         size: content.length,
-        contentBase64: content.toString('base64'),
+        content,
       };
     } finally {
       lock.release();
     }
+  }
+
+  /**
+   * Download an attachment into the configured attachment download directory.
+   * Returns metadata only — bytes never leave the filesystem as base64.
+   */
+  async downloadAttachmentToDownloadDir(
+    accountName: string,
+    emailId: string,
+    mailbox: string,
+    filename: string,
+    options: {
+      downloadDir: string;
+      allowedExtensions: readonly string[];
+      maxBytes: number;
+      saveAs?: string;
+    },
+  ): Promise<{
+    filename: string;
+    mimeType: string;
+    size: number;
+    savedTo: string;
+  }> {
+    const basename = options.saveAs
+      ? assertSafeDownloadBasename(options.saveAs)
+      : sanitizeAttachmentBasename(filename);
+    assertAllowedExtension(basename, options.allowedExtensions);
+
+    const downloaded = await this.downloadAttachmentBuffer(
+      accountName,
+      emailId,
+      mailbox,
+      filename,
+      options.maxBytes,
+    );
+
+    const target = await resolveAttachmentDownloadPath(options.downloadDir, basename);
+    await writeDownloadFileAtomic(target, downloaded.content);
+
+    return {
+      filename: basename,
+      mimeType: downloaded.mimeType,
+      size: downloaded.size,
+      savedTo: target,
+    };
   }
 
   // -------------------------------------------------------------------------
