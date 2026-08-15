@@ -441,6 +441,68 @@ For single-account setups (overrides config file):
 | `MCP_EMAIL_SMTP_POOL_MAX_CONNECTIONS` | `1` | Max pooled SMTP connections |
 | `MCP_EMAIL_SMTP_POOL_MAX_MESSAGES` | `100` | Max messages per pooled connection |
 | `MCP_EMAIL_RATE_LIMIT` | `10` | Max sends per minute |
+| `MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR` | — | Directory for `download_attachment` with `save_to_download_dir=true`. Alias: `EMAIL_ATTACHMENT_DOWNLOAD_DIR` |
+| `MCP_EMAIL_ATTACHMENT_DOWNLOAD_ALLOWED_EXTENSIONS` | `pdf,png,jpg,jpeg,webp,tiff,txt,md,doc,docx,odt,xls,xlsx,csv` | Comma-separated allowlist for download-dir saves |
+| `MCP_EMAIL_ATTACHMENT_DOWNLOAD_MAX_BYTES` | `26214400` | Max attachment size for download-dir writes (25 MB) |
+
+### Attachment download directory
+
+By default `download_attachment` returns base64 (≤5 MB). For larger files — or to hand a document to another MCP without stuffing the model context — set an attachment download directory and call the tool with `save_to_download_dir=true`:
+
+```json
+{
+  "account": "default",
+  "id": "42",
+  "filename": "invoice.pdf",
+  "save_to_download_dir": true,
+  "save_as": "invoice.pdf"
+}
+```
+
+Response (no base64):
+
+```json
+{
+  "filename": "invoice.pdf",
+  "mimeType": "application/pdf",
+  "size": 204800,
+  "savedTo": "/data/attachments/invoice.pdf"
+}
+```
+
+Safeguards:
+
+- **Configured directory only** — agents cannot pick an arbitrary path; `save_as` must be a basename
+- **Extension allowlist** — reject downloads whose final name is not on `MCP_EMAIL_ATTACHMENT_DOWNLOAD_ALLOWED_EXTENSIONS`
+- **Path jail** — separators, `..`, and absolute paths are rejected; writes use temp file + rename (replaces symlinks rather than writing through them)
+
+#### Sharing the download directory with another MCP server
+
+Mount the same volume into email-mcp and any other tool that reads files by path. Use the `savedTo` value from `download_attachment` as the path on that shared volume:
+
+```yaml
+services:
+  email-mcp:
+    image: ghcr.io/codefuturist/email-mcp:latest
+    command: ["http", "8080"]
+    environment:
+      MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR: /data/attachments
+      # …IMAP/SMTP env…
+    volumes:
+      - attachments:/data/attachments
+    ports:
+      - "8081:8080"
+
+  other-mcp:
+    image: example/other-mcp:latest
+    volumes:
+      - attachments:/data/attachments
+
+volumes:
+  attachments:
+```
+
+The download directory must be writable by the container user (`node`, uid typically 1000).
 
 ### Email Scheduling
 
@@ -655,7 +717,7 @@ Features:
 | `get_emails` | Fetch full content of multiple emails in a single call (max 20) |
 | `get_email_status` | Get read/flag/label state of an email without fetching the body |
 | `search_emails` | Search by keyword across subject, sender, and body |
-| `download_attachment` | Download an email attachment by filename |
+| `download_attachment` | Download an email attachment by filename (base64, or `save_to_download_dir=true` for path-only) |
 | `find_email_folder` | Discover the real folder(s) an email resides in (resolves virtual folders) |
 | `extract_contacts` | Extract unique contacts from recent email headers |
 | `get_thread` | Reconstruct a conversation thread via References/In-Reply-To |

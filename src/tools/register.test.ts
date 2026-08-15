@@ -41,6 +41,10 @@ function createConfig(readOnly: boolean): AppConfig {
     settings: {
       rateLimit: 10,
       readOnly,
+      attachmentDownload: {
+        allowedExtensions: ['pdf'],
+        maxBytes: 25 * 1024 * 1024,
+      },
       watcher: { enabled: false, folders: ['INBOX'], idleTimeout: 1740 },
       hooks: {
         onNewEmail: 'notify',
