@@ -466,7 +466,7 @@ Response (no base64):
   "filename": "invoice.pdf",
   "mimeType": "application/pdf",
   "size": 204800,
-  "savedTo": "/workspace/paperless/invoice.pdf"
+  "savedTo": "/data/attachments/invoice.pdf"
 }
 ```
 
@@ -478,7 +478,7 @@ Safeguards:
 
 #### Sharing the download directory with another MCP server
 
-Mount the same volume into email-mcp and e.g. [PaperlessMCP](https://github.com/barryw/PaperlessMCP) (which calls its shared dir an “outbox”), then upload with `paperless_documents_upload_from_path` using the `savedTo` path:
+Mount the same volume into email-mcp and any other tool that reads files by path. Use the `savedTo` value from `download_attachment` as the path on that shared volume:
 
 ```yaml
 services:
@@ -486,22 +486,20 @@ services:
     image: ghcr.io/codefuturist/email-mcp:latest
     command: ["http", "8080"]
     environment:
-      MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR: /workspace/paperless
+      MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR: /data/attachments
       # …IMAP/SMTP env…
     volumes:
-      - paperless-outbox:/workspace/paperless
+      - attachments:/data/attachments
     ports:
       - "8081:8080"
 
-  paperless-mcp:
-    image: ghcr.io/barryw/paperlessmcp:latest
-    environment:
-      PAPERLESS_OUTBOX_DIR: /workspace/paperless
+  other-mcp:
+    image: example/other-mcp:latest
     volumes:
-      - paperless-outbox:/workspace/paperless
+      - attachments:/data/attachments
 
 volumes:
-  paperless-outbox:
+  attachments:
 ```
 
 The download directory must be writable by the container user (`node`, uid typically 1000).

@@ -373,7 +373,7 @@ read_only = false  # set to true to disable all write operations
 
 # Optional attachment download dir (also: MCP_EMAIL_ATTACHMENT_DOWNLOAD_DIR)
 # [settings.attachment_download]
-# dir = "/workspace/paperless"
+# dir = "/data/attachments"
 # allowed_extensions = ["pdf", "png", "jpg", "jpeg", "webp", "tiff", "txt", "md", "doc", "docx", "odt", "xls", "xlsx", "csv"]
 # max_bytes = 26214400
 

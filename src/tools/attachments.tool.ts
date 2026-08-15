@@ -18,7 +18,7 @@ export default function registerAttachmentTools(
     'Download an email attachment by filename. First use get_email to see available attachments and their filenames. ' +
       'By default returns base64-encoded content for files ≤5MB. ' +
       'Set save_to_download_dir=true to write the file into the server-configured attachment download directory ' +
-      'and return only metadata (path, size, mime) — preferred for large files and for handing off to another MCP (e.g. Paperless).',
+      'and return only metadata (path, size, mime) — preferred for large files and for handing off to another MCP by path.',
     {
       account: z.string().describe('Account name from list_accounts'),
       id: z.string().describe('Email ID (UID) from list_emails or get_email'),
