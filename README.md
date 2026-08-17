@@ -667,7 +667,7 @@ Features:
 
 | Tool | Description |
 |------|-------------|
-| `send_email` | Send a new email (plain text or HTML, CC/BCC) |
+| `send_email` | Send a new email (plain text or HTML, CC/BCC, attachments) |
 | `reply_email` | Reply with proper threading (In-Reply-To, References) |
 | `forward_email` | Forward with original content quoted |
 | `save_draft` | Save an email draft to the Drafts folder |

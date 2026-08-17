@@ -6,7 +6,7 @@
 
 import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
-import type { SendResult } from '../types/index.js';
+import type { Attachment, SendResult } from '../types/index.js';
 import type ImapService from './imap.service.js';
 
 export default class SmtpService {
@@ -29,6 +29,7 @@ export default class SmtpService {
       cc?: string[];
       bcc?: string[];
       html?: boolean;
+      attachments?: Attachment[];
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
@@ -43,6 +44,7 @@ export default class SmtpService {
       bcc: options.bcc?.join(', '),
       subject: options.subject,
       ...(options.html ? { html: options.body } : { text: options.body }),
+      ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     });
 
     return {

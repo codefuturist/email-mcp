@@ -5,9 +5,42 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import audit from '../safety/audit.js';
-import { validateInputLength } from '../safety/validation.js';
+import { validateAttachmentPath, validateInputLength } from '../safety/validation.js';
 
 import type SmtpService from '../services/smtp.service.js';
+
+/** Maximum size of a single attachment, in bytes. */
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/** Maximum combined size of all attachments on one message, in bytes. */
+const MAX_ATTACHMENTS_TOTAL_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Validate every attachment path and return nodemailer-ready descriptors.
+ * @param attachments - Raw attachment inputs from the tool call.
+ * @returns Resolved attachments, or undefined when none were supplied.
+ */
+async function resolveAttachments(
+  attachments?: { path: string; filename?: string; contentType?: string }[],
+): Promise<{ path: string; filename?: string; contentType?: string }[] | undefined> {
+  if (!attachments?.length) return undefined;
+
+  const resolved = await Promise.all(
+    attachments.map(async (a) => {
+      const { path, size } = await validateAttachmentPath(a.path, MAX_ATTACHMENT_BYTES);
+      return { ...a, path, size };
+    }),
+  );
+
+  const total = resolved.reduce((sum, a) => sum + a.size, 0);
+  if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+    throw new Error(
+      `Combined attachment size is ${total} bytes, exceeding the ${MAX_ATTACHMENTS_TOTAL_BYTES} byte limit`,
+    );
+  }
+
+  return resolved.map(({ size: _size, ...rest }) => rest);
+}
 
 export default function registerSendTools(server: McpServer, smtpService: SmtpService): void {
   // ---------------------------------------------------------------------------
@@ -24,13 +57,30 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       cc: z.array(z.string().email()).optional().describe('CC recipients'),
       bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
       html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
+      attachments: z
+        .array(
+          z.object({
+            path: z.string().describe('Path to the file on the machine running this server'),
+            filename: z
+              .string()
+              .optional()
+              .describe('Name shown to the recipient (default: basename of path)'),
+            contentType: z
+              .string()
+              .optional()
+              .describe('MIME type (inferred from the filename when omitted)'),
+          }),
+        )
+        .optional()
+        .describe('Files to attach. Max 25MB per file and 25MB combined.'),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
       try {
         validateInputLength(params.subject, 998, 'Subject');
         validateInputLength(params.body, 5_000_000, 'Body');
-        const result = await smtpService.sendEmail(params.account, params);
+        const attachments = await resolveAttachments(params.attachments);
+        const result = await smtpService.sendEmail(params.account, { ...params, attachments });
         await audit.log(
           'send_email',
           params.account,
@@ -41,7 +91,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email sent successfully!\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}\nMessage-ID: ${result.messageId}`,
+              text: `✅ Email sent successfully!\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}${attachments?.length ? `\nAttachments: ${attachments.length}` : ''}\nMessage-ID: ${result.messageId}`,
             },
           ],
         };

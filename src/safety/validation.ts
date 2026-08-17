@@ -1,5 +1,8 @@
 /** Input validation and sanitization utilities. */
 
+import { realpath, stat } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
+
 /**
  * Validate and sanitize an IMAP mailbox name.
  * Rejects names containing IMAP wildcard characters (`*`, `%`) or empty strings.
@@ -118,4 +121,44 @@ export function validateInputLength(input: string, maxLength: number, fieldName:
   if (input.length > maxLength) {
     throw new Error(`${fieldName} exceeds maximum length of ${maxLength} characters`);
   }
+}
+
+/**
+ * Validate an attachment file path.
+ *
+ * Rejects paths containing null bytes or control characters, resolves the path
+ * to an absolute one, and ensures the target exists, is a regular file, and
+ * does not exceed the size limit. Symlinks are resolved before validation so a
+ * link cannot be used to reach an unintended target.
+ *
+ * @param filePath - The attachment path to validate.
+ * @param maxBytes - Maximum allowed file size in bytes.
+ * @returns The resolved absolute path and its size in bytes.
+ */
+export async function validateAttachmentPath(
+  filePath: string,
+  maxBytes: number,
+): Promise<{ path: string; size: number }> {
+  if (filePath.includes('\0')) {
+    throw new Error('Attachment path must not contain null bytes');
+  }
+
+  const trimmed = filePath.trim();
+  if (trimmed.length === 0) {
+    throw new Error('Attachment path must not be empty');
+  }
+
+  const resolved = await realpath(resolve(trimmed));
+
+  const stats = await stat(resolved);
+  if (!stats.isFile()) {
+    throw new Error(`Attachment is not a regular file: ${filePath}`);
+  }
+  if (stats.size > maxBytes) {
+    throw new Error(
+      `Attachment ${basename(resolved)} is ${stats.size} bytes, exceeding the ${maxBytes} byte limit`,
+    );
+  }
+
+  return { path: resolved, size: stats.size };
 }

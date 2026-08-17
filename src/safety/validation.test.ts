@@ -1,7 +1,11 @@
+import { mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   sanitizeMailboxName,
   sanitizeSearchQuery,
   sanitizeTemplateVariable,
+  validateAttachmentPath,
   validateInputLength,
   validateLabelName,
   validateWebhookUrl,
@@ -171,5 +175,51 @@ describe('validateInputLength', () => {
 
   it('allows under max length', () => {
     expect(() => validateInputLength('ab', 5, 'name')).not.toThrow();
+  });
+});
+
+describe('validateAttachmentPath', () => {
+  let dir: string;
+
+  beforeAll(async () => {
+    // realpath: on macOS the temp dir sits under /var, itself a symlink to
+    // /private/var, and validateAttachmentPath returns resolved paths.
+    dir = await realpath(await mkdtemp(join(tmpdir(), 'email-mcp-attach-')));
+  });
+
+  it('returns the resolved path and size for a readable file', async () => {
+    const file = join(dir, 'note.txt');
+    await writeFile(file, 'hello');
+    await expect(validateAttachmentPath(file, 1024)).resolves.toEqual({ path: file, size: 5 });
+  });
+
+  it('rejects a path containing a null byte', async () => {
+    await expect(validateAttachmentPath('/tmp/a\0b', 1024)).rejects.toThrow('null bytes');
+  });
+
+  it('rejects an empty path', async () => {
+    await expect(validateAttachmentPath('   ', 1024)).rejects.toThrow('must not be empty');
+  });
+
+  it('rejects a file that does not exist', async () => {
+    await expect(validateAttachmentPath(join(dir, 'missing.txt'), 1024)).rejects.toThrow();
+  });
+
+  it('rejects a directory', async () => {
+    await expect(validateAttachmentPath(dir, 1024)).rejects.toThrow('not a regular file');
+  });
+
+  it('rejects a file larger than the limit', async () => {
+    const big = join(dir, 'big.bin');
+    await writeFile(big, Buffer.alloc(2048));
+    await expect(validateAttachmentPath(big, 1024)).rejects.toThrow('exceeding');
+  });
+
+  it('resolves symlinks to their target', async () => {
+    const target = join(dir, 'target.txt');
+    const link = join(dir, 'link.txt');
+    await writeFile(target, 'data');
+    await symlink(target, link);
+    await expect(validateAttachmentPath(link, 1024)).resolves.toMatchObject({ path: target });
   });
 });

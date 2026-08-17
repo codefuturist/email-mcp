@@ -351,6 +351,25 @@ export interface LabelInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/**
+ * A file to attach to an outgoing message.
+ *
+ * `path` is a filesystem path readable by the MCP server process; it is
+ * validated and resolved before the message is sent.
+ */
+export interface Attachment {
+  /** Absolute or relative path to the file on the server host. */
+  path: string;
+  /** Name shown to the recipient. Defaults to the file's basename. */
+  filename?: string;
+  /** Explicit MIME type. Nodemailer infers it from the filename when omitted. */
+  contentType?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Scheduling
 // ---------------------------------------------------------------------------
 
