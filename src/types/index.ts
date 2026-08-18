@@ -209,6 +209,18 @@ export interface Email extends EmailMeta {
   headers: Record<string, string>;
 }
 
+export interface EmailSecurityInfo {
+  fromDomain?: string;
+  returnPathDomain?: string;
+  replyToDomain?: string;
+  spf: string[];
+  dkim: string[];
+  dmarc: string[];
+  dkimDomains: string[];
+  authenticationResultsPresent: boolean;
+  listUnsubscribe: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
