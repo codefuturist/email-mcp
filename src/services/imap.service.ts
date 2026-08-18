@@ -15,6 +15,7 @@ import type {
   Email,
   EmailAddress,
   EmailMeta,
+  EmailSecurityInfo,
   EmailStats,
   LabelInfo,
   Mailbox,
@@ -39,6 +40,48 @@ function parseAddress(addr: { name?: string; address?: string } | undefined): Em
 function parseAddresses(addrs: { name?: string; address?: string }[] | undefined): EmailAddress[] {
   if (!addrs) return [];
   return addrs.map(parseAddress);
+}
+
+function parseHeaderBuffer(buffer: Buffer): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const unfolded = buffer.toString('utf-8').replace(/\r?\n[ \t]+/g, ' ');
+
+  for (const line of unfolded.split(/\r?\n/)) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx <= 0) continue;
+
+    const key = line.slice(0, colonIdx).trim().toLowerCase();
+    const value = line.slice(colonIdx + 1).trim();
+    if (!key || !value) continue;
+
+    headers[key] = headers[key] ? `${headers[key]}\n${value}` : value;
+  }
+
+  return headers;
+}
+
+function addressDomain(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const angle = /<\s*([^<>\s]+@[^<>\s]+)\s*>/.exec(value);
+  const plain = /([A-Z0-9._%+\-]+@([A-Z0-9.\-]+))/i.exec(angle?.[1] ?? value);
+  return plain?.[2]?.replace(/[>;,]+$/, '').toLowerCase();
+}
+
+function authStatuses(value: string | undefined, method: 'spf' | 'dkim' | 'dmarc'): string[] {
+  if (!value) return [];
+  const pattern = new RegExp(`(?:^|[;\\s])${method}\\s*=\\s*([a-z][a-z0-9_-]*)`, 'gi');
+  return [...new Set([...value.matchAll(pattern)].map((match) => match[1].toLowerCase()))];
+}
+
+function dkimSigningDomains(authenticationResults: string, dkimSignature: string): string[] {
+  const domains = new Set<string>();
+  for (const match of authenticationResults.matchAll(/\bheader\.d\s*=\s*([^;\s]+)/gi)) {
+    domains.add(match[1].replace(/[<>;,]+$/g, '').toLowerCase());
+  }
+  for (const match of dkimSignature.matchAll(/(?:^|;)\s*d\s*=\s*([^;\s]+)/gi)) {
+    domains.add(match[1].replace(/[<>;,]+$/g, '').toLowerCase());
+  }
+  return [...domains];
 }
 
 function hasAttachments(bodyStructure: unknown): boolean {
@@ -426,6 +469,60 @@ export default class ImapService {
       }
 
       return await messageToEmail(msg as unknown as Record<string, unknown>, client, uid);
+    } finally {
+      lock.release();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Get sender-authentication signals (lightweight — headers only, no body fetch)
+  // -------------------------------------------------------------------------
+
+  async getEmailSecurity(
+    accountName: string,
+    emailId: string,
+    mailbox = 'INBOX',
+  ): Promise<EmailSecurityInfo> {
+    const client = await this.connections.getImapClient(accountName);
+    const uid = parseInt(emailId, 10);
+    const safeMailbox = sanitizeMailboxName(mailbox);
+
+    const lock = await client.getMailboxLock(safeMailbox);
+    try {
+      const msg = await client.fetchOne(
+        String(uid),
+        { uid: true, envelope: true, headers: true },
+        { uid: true },
+      );
+
+      if (!msg) {
+        throw new Error(`Email ${emailId} not found in ${mailbox}`);
+      }
+
+      const headers =
+        msg.headers && Buffer.isBuffer(msg.headers) ? parseHeaderBuffer(msg.headers) : {};
+      const envelope = (msg.envelope ?? {}) as Record<string, unknown>;
+      const from = parseAddress((envelope.from as Record<string, string>[])?.[0]);
+      const authenticationResults = headers['authentication-results'] ?? '';
+      const receivedSpf = headers['received-spf'] ?? '';
+      const spf = new Set(authStatuses(authenticationResults, 'spf'));
+      const receivedSpfStatus = /^\s*([a-z][a-z0-9_-]*)/i.exec(receivedSpf)?.[1]?.toLowerCase();
+      if (receivedSpfStatus) spf.add(receivedSpfStatus);
+
+      return {
+        fromDomain: addressDomain(from.address),
+        returnPathDomain: addressDomain(headers['return-path']),
+        replyToDomain: addressDomain(headers['reply-to']),
+        spf: [...spf],
+        dkim: authStatuses(authenticationResults, 'dkim'),
+        dmarc: authStatuses(authenticationResults, 'dmarc'),
+        dkimDomains: dkimSigningDomains(
+          authenticationResults,
+          headers['dkim-signature'] ?? '',
+        ),
+        authenticationResultsPresent: Boolean(authenticationResults),
+        listUnsubscribe: Boolean(headers['list-unsubscribe']),
+      };
     } finally {
       lock.release();
     }

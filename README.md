@@ -652,6 +652,7 @@ Features:
 | `list_mailboxes` | List folders with unread counts and special-use flags |
 | `list_emails` | Paginated email listing with date, sender, subject, and flag filters |
 | `get_email` | Read full email content with attachment metadata |
+| `get_email_security` | Read sender-authentication signals (SPF/DKIM/DMARC and related domains) without exposing raw headers or body |
 | `get_emails` | Fetch full content of multiple emails in a single call (max 20) |
 | `get_email_status` | Get read/flag/label state of an email without fetching the body |
 | `search_emails` | Search by keyword across subject, sender, and body |

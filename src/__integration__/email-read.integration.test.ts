@@ -19,6 +19,18 @@ describe('Email Read Operations', () => {
     await seedEmails(5);
     await seedEmail({ from: 'alice@localhost', subject: 'From Alice' });
     await seedEmail({ from: 'bob@localhost', subject: 'Flagged email' });
+    await seedEmail({
+      from: 'authsender@localhost',
+      subject: 'Authenticated sender',
+      text: 'Authentication test message',
+      headers: {
+        'Authentication-Results':
+          'mx.example; spf=pass smtp.mailfrom=mailer.example; dkim=pass header.d=mailer.example header.s=very-long-selector-for-header-folding; dmarc=pass header.from=mailer.example',
+        'DKIM-Signature': 'v=1; a=rsa-sha256; d=mailer.example; s=test; b=placeholder',
+        'Reply-To': 'Support <support@reply.example>',
+        'List-Unsubscribe': '<mailto:unsubscribe@mailer.example>',
+      },
+    });
     await seedThread(3, { subject: 'Discussion Topic' });
     await waitForDelivery();
   });
@@ -94,6 +106,31 @@ describe('Email Read Operations', () => {
       expect(email.subject).toBeTruthy();
       expect(email.from).toBeDefined();
       expect(email.messageId).toBeTruthy();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // get_email_security
+  // ---------------------------------------------------------------------------
+
+  describe('getEmailSecurity', () => {
+    it('should expose derived sender-authentication signals without reading the body', async () => {
+      const all = await services.imapService.listEmails(TEST_ACCOUNT_NAME, { pageSize: 50 });
+      const target = all.items.find((email) => email.subject === 'Authenticated sender');
+      expect(target).toBeDefined();
+
+      const security = await services.imapService.getEmailSecurity(
+        TEST_ACCOUNT_NAME,
+        target?.id ?? '',
+      );
+
+      expect(security.authenticationResultsPresent).toBe(true);
+      expect(security.spf).toContain('pass');
+      expect(security.dkim).toContain('pass');
+      expect(security.dmarc).toContain('pass');
+      expect(security.dkimDomains).toContain('mailer.example');
+      expect(security.replyToDomain).toBe('reply.example');
+      expect(security.listUnsubscribe).toBe(true);
     });
   });
 

@@ -1,5 +1,5 @@
 /**
- * MCP tools: list_emails, get_email, get_emails, get_email_status, search_emails
+ * MCP tools: list_emails, get_email, get_email_security, get_emails, get_email_status, search_emails
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -176,6 +176,56 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
             {
               type: 'text' as const,
               text: `Failed to list emails: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // get_email_security
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'get_email_security',
+    'Get read-only sender-authentication signals for an email without returning the raw header block or body. ' +
+      'Reports SPF, DKIM, DMARC, sender-related domains, DKIM signing domains, and List-Unsubscribe presence. ' +
+      'Does not mark the email as seen. Missing authentication results are reported as unavailable, not as failure.',
+    {
+      account: z.string().describe('Account name from list_accounts'),
+      emailId: z.string().describe('Email ID from list_emails or search_emails'),
+      mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
+    },
+    { readOnlyHint: true, destructiveHint: false },
+    async ({ account, emailId, mailbox }) => {
+      try {
+        const security = await imapService.getEmailSecurity(account, emailId, mailbox);
+        const renderStatuses = (values: string[]) =>
+          values.length > 0 ? values.join(', ') : 'not reported';
+
+        const parts = [
+          '🔐 Email security signals',
+          `From domain:        ${security.fromDomain ?? 'not available'}`,
+          `Return-Path domain: ${security.returnPathDomain ?? 'not available'}`,
+          `Reply-To domain:    ${security.replyToDomain ?? 'not available'}`,
+          `SPF:                ${renderStatuses(security.spf)}`,
+          `DKIM:               ${renderStatuses(security.dkim)}`,
+          `DMARC:              ${renderStatuses(security.dmarc)}`,
+          `DKIM domains:       ${security.dkimDomains.length > 0 ? security.dkimDomains.join(', ') : 'not reported'}`,
+          `Authentication-Results: ${security.authenticationResultsPresent ? 'present' : 'not present'}`,
+          `List-Unsubscribe:       ${security.listUnsubscribe ? 'present' : 'not present'}`,
+          '',
+          'Note: these are signals supplied by the receiving mail system; absence alone is not an authentication failure.',
+        ];
+
+        return { content: [{ type: 'text' as const, text: parts.join('\n') }] };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: `Failed to get email security signals: ${err instanceof Error ? err.message : String(err)}`,
             },
           ],
         };
