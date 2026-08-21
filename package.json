@@ -1,6 +1,6 @@
 {
   "name": "@codefuturist/email-mcp",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "mcpName": "io.github.codefuturist/email-mcp",
   "description": "Email MCP server with IMAP + SMTP support",
   "type": "module",
@@ -17,17 +17,17 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
+    "lint": "biome lint src/",
+    "lint:fix": "biome lint --write src/",
     "format": "biome format --write src/",
-    "format:check": "biome check src/",
+    "format:check": "biome format src/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.config.integration.ts",
     "test:all": "vitest run && vitest run --config vitest.config.integration.ts",
-    "check": "biome check src/ && eslint src/",
-    "report": "mkdir -p reports && biome check src/ --reporter=json > reports/biome.json 2>&1; eslint src/ -f json -o reports/eslint.json; actionlint -format '{{json .}}' > reports/actionlint.json 2>&1; pnpm test",
+    "check": "biome check src/",
+    "report": "mkdir -p reports && biome check src/ --reporter=json > reports/biome.json 2>&1; actionlint -format '{{json .}}' > reports/actionlint.json 2>&1; pnpm test",
     "commit": "cog commit",
     "changelog": "cog changelog",
     "version:check": "cog check",
@@ -75,31 +75,29 @@
     "url": "https://github.com/codefuturist/email-mcp/issues"
   },
   "dependencies": {
-    "@clack/prompts": "^1.0.1",
+    "@clack/prompts": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "imapflow": "^1.2.9",
-    "node-ical": "^0.25.2",
-    "nodemailer": "^8.0.1",
-    "smol-toml": "^1.6.0",
-    "zod": "^4.3.6"
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "imapflow": "^1.7.1",
+    "node-ical": "^0.27.1",
+    "nodemailer": "^9.0.5",
+    "smol-toml": "^1.8.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.2",
-    "@eslint/compat": "^2.0.2",
-    "@eslint/js": "^9.39.2",
-    "@types/node": "^25.2.3",
-    "@types/nodemailer": "^7.0.10",
-    "@vitest/coverage-v8": "^4.0.18",
-    "eslint": "^9.39.2",
-    "eslint-config-airbnb-extended": "^3.0.1",
-    "lefthook": "^2.1.1",
-    "testcontainers": "^11.12.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "@biomejs/biome": "^2.5.8",
+    "@types/node": "^26.2.0",
+    "@types/nodemailer": "^8.0.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "lefthook": "^2.1.10",
+    "testcontainers": "^12.1.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "engines": {
     "node": ">=24.0.0"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@11.22.0"
 }

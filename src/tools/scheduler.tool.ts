@@ -4,7 +4,7 @@
  * Email scheduling tools for "send later" functionality.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import audit from '../safety/audit.js';
 
@@ -18,21 +18,27 @@ export default function registerSchedulerTools(
   // schedule_email (write)
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'schedule_email',
-    'Schedule an email to be sent at a specific time in the future. The email is queued locally and sent automatically when the time arrives.',
     {
-      account: z.string().describe('Account name to send from'),
-      to: z.array(z.string()).min(1).describe('Recipient email addresses'),
-      subject: z.string().describe('Email subject'),
-      body: z.string().describe('Email body'),
-      send_at: z.string().describe("When to send (ISO 8601 datetime, e.g. '2025-02-20T09:00:00Z')"),
-      cc: z.array(z.string()).optional().describe('CC recipients'),
-      bcc: z.array(z.string()).optional().describe('BCC recipients'),
-      html: z.boolean().default(false).describe('Send as HTML (default: false)'),
-      in_reply_to: z.string().optional().describe('Message-ID to reply to'),
+      title: 'Schedule email',
+      description:
+        'Schedule an email to be sent at a specific time in the future. The email is queued locally and sent automatically when the time arrives.',
+      inputSchema: z.object({
+        account: z.string().describe('Account name to send from'),
+        to: z.array(z.string()).min(1).describe('Recipient email addresses'),
+        subject: z.string().describe('Email subject'),
+        body: z.string().describe('Email body'),
+        send_at: z
+          .string()
+          .describe("When to send (ISO 8601 datetime, e.g. '2025-02-20T09:00:00Z')"),
+        cc: z.array(z.string()).optional().describe('CC recipients'),
+        bcc: z.array(z.string()).optional().describe('BCC recipients'),
+        html: z.boolean().default(false).describe('Send as HTML (default: false)'),
+        in_reply_to: z.string().optional().describe('Message-ID to reply to'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    { readOnlyHint: false, destructiveHint: false },
     async (params) => {
       const scheduled = await schedulerService.schedule(params.account, {
         to: params.to,
@@ -69,17 +75,20 @@ export default function registerSchedulerTools(
   // list_scheduled (read)
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'list_scheduled',
-    'List scheduled emails. Shows pending, sent, or all scheduled emails.',
     {
-      account: z.string().optional().describe('Filter by account name (all accounts if omitted)'),
-      status: z
-        .enum(['pending', 'sent', 'failed', 'all'])
-        .default('pending')
-        .describe('Filter by status (default: pending)'),
+      title: 'List scheduled',
+      description: 'List scheduled emails. Shows pending, sent, or all scheduled emails.',
+      inputSchema: z.object({
+        account: z.string().optional().describe('Filter by account name (all accounts if omitted)'),
+        status: z
+          .enum(['pending', 'sent', 'failed', 'all'])
+          .default('pending')
+          .describe('Filter by status (default: pending)'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ account, status }) => {
       const emails = await schedulerService.list({
         account,
@@ -113,13 +122,17 @@ export default function registerSchedulerTools(
   // cancel_scheduled (write)
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'cancel_scheduled',
-    'Cancel a scheduled email. Removes it from the queue and deletes the associated draft.',
     {
-      schedule_id: z.string().describe('Schedule ID to cancel'),
+      title: 'Cancel scheduled',
+      description:
+        'Cancel a scheduled email. Removes it from the queue and deletes the associated draft.',
+      inputSchema: z.object({
+        schedule_id: z.string().describe('Schedule ID to cancel'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    { readOnlyHint: false, destructiveHint: true },
     async ({ schedule_id: scheduleId }) => {
       const result = await schedulerService.cancel(scheduleId);
 

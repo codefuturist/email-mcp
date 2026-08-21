@@ -4,7 +4,7 @@
  * Static resource listing all configured email accounts.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 
 import type ConnectionManager from '../connections/manager.js';
 
@@ -22,7 +22,7 @@ export default function registerAccountsResource(
     };
   });
 
-  server.resource(
+  server.registerResource(
     'accounts',
     'email://accounts',
     { description: 'List of all configured email accounts' },

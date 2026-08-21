@@ -5,20 +5,24 @@
  * urgency and action needed.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 export default function registerTriagePrompt(server: McpServer): void {
-  server.prompt(
+  server.registerPrompt(
     'triage_inbox',
-    'Analyze unread emails and categorize by urgency. Produces a structured triage report with recommended actions.',
     {
-      account: z.string().describe('Account name to triage'),
-      mailbox: z.string().default('INBOX').describe('Mailbox to triage (default: INBOX)'),
-      limit: z
-        .string()
-        .default('20')
-        .describe('Maximum number of unread emails to analyze (default: 20)'),
+      title: 'Triage inbox',
+      description:
+        'Analyze unread emails and categorize by urgency. Produces a structured triage report with recommended actions.',
+      argsSchema: z.object({
+        account: z.string().describe('Account name to triage'),
+        mailbox: z.string().default('INBOX').describe('Mailbox to triage (default: INBOX)'),
+        limit: z
+          .string()
+          .default('20')
+          .describe('Maximum number of unread emails to analyze (default: 20)'),
+      }),
     },
     async ({ account, mailbox, limit }) => {
       const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);

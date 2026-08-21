@@ -3,7 +3,7 @@
  * check notification setup, test notifications, configure alerts.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { loadRawConfig, saveConfig } from '../config/loader.js';
 import type HooksService from '../services/hooks.service.js';
@@ -22,11 +22,13 @@ export default function registerWatcherTools(
   // get_watcher_status — read
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'get_watcher_status',
-    'Get the status of IMAP IDLE watcher connections and recent activity.',
-    {},
-    { readOnlyHint: true, destructiveHint: false },
+    {
+      title: 'Get watcher status',
+      description: 'Get the status of IMAP IDLE watcher connections and recent activity.',
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
     async () => {
       const status = watcherService.getStatus();
 
@@ -61,11 +63,14 @@ export default function registerWatcherTools(
   // list_presets — read
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'list_presets',
-    'List all available AI triage presets with their descriptions and suggested labels.',
-    {},
-    { readOnlyHint: true, destructiveHint: false },
+    {
+      title: 'List presets',
+      description:
+        'List all available AI triage presets with their descriptions and suggested labels.',
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
     async () => {
       const presets = listAllPresets();
       const activePreset = hooksConfig.preset;
@@ -94,11 +99,14 @@ export default function registerWatcherTools(
   // get_hooks_config — read
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'get_hooks_config',
-    'Get the current AI hooks configuration including preset, rules, and custom instructions.',
-    {},
-    { readOnlyHint: true, destructiveHint: false },
+    {
+      title: 'Get hooks config',
+      description:
+        'Get the current AI hooks configuration including preset, rules, and custom instructions.',
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
     async () => {
       const sections: string[] = [
         `⚙️  Hooks Configuration:`,
@@ -162,13 +170,16 @@ export default function registerWatcherTools(
   // check_notification_setup — diagnose platform support
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'check_notification_setup',
-    'Diagnose desktop notification support on this platform. ' +
-      'Checks if required OS tools are available and provides setup instructions ' +
-      'to enable notification permissions (macOS, Linux, Windows).',
-    {},
-    { readOnlyHint: true, destructiveHint: false },
+    {
+      title: 'Check notification setup',
+      description:
+        'Diagnose desktop notification support on this platform. ' +
+        'Checks if required OS tools are available and provides setup instructions ' +
+        'to enable notification permissions (macOS, Linux, Windows).',
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
     async () => {
       const diag = await NotifierService.checkPlatformSupport();
       const notifier = hooksService.getNotifier();
@@ -224,14 +235,21 @@ export default function registerWatcherTools(
   // test_notification — send a test notification
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'test_notification',
-    'Send a test desktop notification to verify that OS permissions are correctly configured. ' +
-      'Use check_notification_setup first to diagnose any issues.',
     {
-      sound: z.boolean().default(false).describe('Include a sound alert in the test notification'),
+      title: 'Test notification',
+      description:
+        'Send a test desktop notification to verify that OS permissions are correctly configured. ' +
+        'Use check_notification_setup first to diagnose any issues.',
+      inputSchema: z.object({
+        sound: z
+          .boolean()
+          .default(false)
+          .describe('Include a sound alert in the test notification'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    { readOnlyHint: false, destructiveHint: false },
     async ({ sound }) => {
       const notifier = hooksService.getNotifier();
       const result = await notifier.sendTestNotification(sound);
@@ -257,32 +275,36 @@ export default function registerWatcherTools(
   // configure_alerts — runtime alert configuration
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'configure_alerts',
-    'Update alert/notification settings at runtime. Changes take effect immediately. ' +
-      'Use save=true to persist changes to the config file. ' +
-      'Omit any field to leave it unchanged.',
     {
-      desktop: z.boolean().optional().describe('Enable/disable desktop notifications'),
-      sound: z.boolean().optional().describe('Enable/disable sound alerts for urgent emails'),
-      urgency_threshold: z
-        .enum(['urgent', 'high', 'normal', 'low'])
-        .optional()
-        .describe('Minimum urgency level to trigger desktop notifications'),
-      webhook_url: z
-        .string()
-        .optional()
-        .describe('Webhook URL for external notifications (empty string to disable)'),
-      webhook_events: z
-        .array(z.enum(['urgent', 'high', 'normal', 'low']))
-        .optional()
-        .describe('Which urgency levels trigger webhook dispatch'),
-      save: z
-        .boolean()
-        .default(false)
-        .describe('Persist changes to config.toml (default: runtime only)'),
+      title: 'Configure alerts',
+      description:
+        'Update alert/notification settings at runtime. Changes take effect immediately. ' +
+        'Use save=true to persist changes to the config file. ' +
+        'Omit any field to leave it unchanged.',
+      inputSchema: z.object({
+        desktop: z.boolean().optional().describe('Enable/disable desktop notifications'),
+        sound: z.boolean().optional().describe('Enable/disable sound alerts for urgent emails'),
+        urgency_threshold: z
+          .enum(['urgent', 'high', 'normal', 'low'])
+          .optional()
+          .describe('Minimum urgency level to trigger desktop notifications'),
+        webhook_url: z
+          .string()
+          .optional()
+          .describe('Webhook URL for external notifications (empty string to disable)'),
+        webhook_events: z
+          .array(z.enum(['urgent', 'high', 'normal', 'low']))
+          .optional()
+          .describe('Which urgency levels trigger webhook dispatch'),
+        save: z
+          .boolean()
+          .default(false)
+          .describe('Persist changes to config.toml (default: runtime only)'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    { readOnlyHint: false, destructiveHint: false },
     async ({
       desktop,
       sound,

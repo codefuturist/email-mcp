@@ -1,74 +1,50 @@
-import { __resetForTesting, bindServer, markInitialized, mcpLog } from './logging.js';
+import { mcpLog } from './logging.js';
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Build a fake McpServer with spies for `isConnected` and `sendLoggingMessage`. */
-function createMockServer(connected = true) {
-  return {
-    isConnected: vi.fn(() => connected),
-    sendLoggingMessage: vi.fn(async () => {}),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Tests
+// mcpLog now writes structured lines to stderr (MCP 2026-07-28 deprecated the
+// server→client logging channel, SEP-2577). These tests pin the stderr sink.
 // ---------------------------------------------------------------------------
 
 describe('mcpLog', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
-    __resetForTesting();
-  });
-
-  it('drops messages when no server is bound', async () => {
-    // No bindServer() called — should not throw
-    await expect(mcpLog('info', 'test', 'hello')).resolves.toBeUndefined();
-  });
-
-  it('drops messages before markInitialized() is called', async () => {
-    const mock = createMockServer(true);
-    bindServer(mock as never);
-
-    await mcpLog('info', 'test', 'should be dropped');
-
-    expect(mock.sendLoggingMessage).not.toHaveBeenCalled();
-  });
-
-  it('forwards messages after markInitialized() when connected', async () => {
-    const mock = createMockServer(true);
-    bindServer(mock as never);
-    markInitialized();
-
-    await mcpLog('info', 'server', 'Email MCP server started');
-
-    expect(mock.sendLoggingMessage).toHaveBeenCalledOnce();
-    expect(mock.sendLoggingMessage).toHaveBeenCalledWith({
-      level: 'info',
-      logger: 'server',
-      data: 'Email MCP server started',
+    writes = [];
+    spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
     });
   });
 
-  it('drops messages when transport is not connected', async () => {
-    const mock = createMockServer(false); // not connected
-    bindServer(mock as never);
-    markInitialized();
-
-    await mcpLog('warning', 'test', 'no transport');
-
-    expect(mock.sendLoggingMessage).not.toHaveBeenCalled();
+  afterEach(() => {
+    spy.mockRestore();
   });
 
-  it('swallows errors from sendLoggingMessage', async () => {
-    const mock = createMockServer(true);
-    mock.sendLoggingMessage = vi.fn(async () => {
-      throw new Error('transport closed');
-    });
-    bindServer(mock as never);
-    markInitialized();
+  it('writes a formatted line to stderr and resolves undefined', async () => {
+    await expect(mcpLog('info', 'server', 'Email MCP server started')).resolves.toBeUndefined();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toContain('INFO');
+    expect(writes[0]).toContain('[server]');
+    expect(writes[0]).toContain('Email MCP server started');
+    expect(writes[0].endsWith('\n')).toBe(true);
+  });
 
-    // Should resolve without throwing
-    await expect(mcpLog('error', 'test', 'boom')).resolves.toBeUndefined();
+  it('uppercases the level and tags the logger', async () => {
+    await mcpLog('warning', 'hooks', 'rate limit reached');
+    expect(writes[0]).toMatch(/\bWARNING\b/);
+    expect(writes[0]).toContain('[hooks]');
+  });
+
+  it('JSON-stringifies non-string data', async () => {
+    await mcpLog('debug', 'test', { count: 3, ok: true });
+    expect(writes[0]).toContain('{"count":3,"ok":true}');
+  });
+
+  it('never throws on circular data', async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    await expect(mcpLog('error', 'test', circular)).resolves.toBeUndefined();
+    expect(writes).toHaveLength(1);
   });
 });

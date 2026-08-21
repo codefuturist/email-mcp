@@ -5,7 +5,7 @@
  * In read-only mode, write tools are not registered at all.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type ConnectionManager from '../connections/manager.js';
 import type CalendarService from '../services/calendar.service.js';
 import type HooksService from '../services/hooks.service.js';

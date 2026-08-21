@@ -1,0 +1,8 @@
+# pnpm 11 settings (camelCase; the package.json "pnpm" field is no longer read).
+# Dependencies allowed to run install/build scripts (supply-chain gate).
+allowBuilds:
+  cpu-features: true
+  esbuild: true
+  lefthook: true
+  protobufjs: true
+  ssh2: true

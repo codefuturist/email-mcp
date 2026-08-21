@@ -4,8 +4,8 @@
  * Dynamic resource providing the mailbox folder tree with message counts.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import type ConnectionManager from '../connections/manager.js';
 import type ImapService from '../services/imap.service.js';
@@ -18,7 +18,7 @@ export default function registerMailboxesResource(
   const names = connections.getAccountNames();
   const accounts = names.map((name) => connections.getAccount(name));
 
-  server.resource(
+  server.registerResource(
     'mailboxes',
     new ResourceTemplate('email://{account}/mailboxes', {
       list: async () => ({

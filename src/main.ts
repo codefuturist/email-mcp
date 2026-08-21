@@ -4,32 +4,18 @@
  *
  * Subcommands:
  *   stdio     Run as MCP server over stdio (default)
- *   setup     Interactive account setup wizard
+ *   http      Run as MCP server over Streamable HTTP (networked)
+ *   account   Account management (list, add, edit, delete)
  *   test      Test IMAP/SMTP connections
  *   config    Config management (show, path, init)
  *   scheduler Email scheduling management
  */
 
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 
-import { loadConfig } from './config/loader.js';
-import ConnectionManager from './connections/manager.js';
-import { bindServer, markInitialized, mcpLog } from './logging.js';
-import registerAllPrompts from './prompts/register.js';
-import registerAllResources from './resources/register.js';
-import RateLimiter from './safety/rate-limiter.js';
-import createServer, { PKG_VERSION } from './server.js';
-import CalendarService from './services/calendar.service.js';
-import HooksService from './services/hooks.service.js';
-import ImapService from './services/imap.service.js';
-import LocalCalendarService from './services/local-calendar.service.js';
-import OAuthService from './services/oauth.service.js';
-import RemindersService from './services/reminders.service.js';
-import SchedulerService from './services/scheduler.service.js';
-import SmtpService from './services/smtp.service.js';
-import TemplateService from './services/template.service.js';
-import WatcherService from './services/watcher.service.js';
-import registerAllTools from './tools/register.js';
+import type { BackgroundHandle } from './app.js';
+import { buildServer, buildServices, startBackgroundServices } from './app.js';
+import { PKG_VERSION } from './server.js';
 
 const HELP = `
 email-mcp — Email MCP Server (IMAP + SMTP)
@@ -39,6 +25,7 @@ Usage:
 
 Commands:
   stdio       Run as MCP server over stdio (default)
+  http        Run as MCP server over Streamable HTTP (networked)
   account     Account management (list, add, edit, delete)
   setup       Alias for 'account add'
   test        Test connections for all or a specific account
@@ -49,7 +36,9 @@ Commands:
   help        Show this help message
 
 Examples:
-  email-mcp                         # Start MCP server
+  email-mcp                         # Start MCP server (stdio)
+  email-mcp http --port 8080         # Start Streamable HTTP server on :8080/mcp
+  email-mcp http --host 0.0.0.0 --port 8080   # Bind all interfaces (requires a token)
   email-mcp account list             # List configured accounts
   email-mcp account add              # Add a new email account
   email-mcp account edit personal    # Edit an account
@@ -71,103 +60,32 @@ Examples:
 `.trim();
 
 async function runServer(): Promise<void> {
-  const config = await loadConfig();
+  const services = await buildServices();
 
-  const oauthService = new OAuthService();
-  const connections = new ConnectionManager(config.accounts, oauthService);
-  const rateLimiter = new RateLimiter(config.settings.rateLimit);
-  const imapService = new ImapService(connections);
-  const smtpService = new SmtpService(connections, rateLimiter, imapService);
-  const templateService = new TemplateService();
-  const calendarService = new CalendarService();
-  const localCalendarService = new LocalCalendarService();
-  const remindersService = new RemindersService();
-  const schedulerService = new SchedulerService(smtpService, imapService);
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
-  const hooksService = new HooksService(config.settings.hooks, imapService);
+  let background: BackgroundHandle | undefined;
+  let started = false;
 
-  const server = createServer();
-  bindServer(server);
+  // serveStdio owns the transport: it selects the protocol era from the
+  // opening exchange, pins one instance from the factory for the connection,
+  // and serves both 2025- and 2026-era clients (legacy shim, default). For
+  // stdio there is exactly one connection, so we start the process-level
+  // background services the first time the factory builds a server — parity
+  // with the old post-`initialized` hook, minus the stateful handshake dance
+  // the 2026-07-28 spec removed.
+  const handle = serveStdio(() => {
+    const server = buildServer(services);
+    if (!started) {
+      started = true;
+      background = startBackgroundServices(services, server.server);
+    }
+    return server;
+  });
 
-  registerAllTools(
-    server,
-    connections,
-    imapService,
-    smtpService,
-    config,
-    templateService,
-    calendarService,
-    localCalendarService,
-    remindersService,
-    schedulerService,
-    watcherService,
-    hooksService,
-  );
-  registerAllResources(server, connections, imapService, templateService, schedulerService);
-  registerAllPrompts(server);
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  // --- Post-handshake initialization ----------------------------------------
-  // Everything below is deferred until the client completes the MCP
-  // `initialize` / `initialized` handshake.  This prevents notifications
-  // from being written to stdout before the client is ready, which would
-  // crash clients like Vibe, and ensures `getClientCapabilities()` returns
-  // the real capabilities (including `sampling` support).
-  // --------------------------------------------------------------------------
-
-  let schedulerInterval: ReturnType<typeof setInterval> | undefined;
-
-  const lowLevelServer = server.server;
-
-  lowLevelServer.oninitialized = () => {
-    markInitialized();
-
-    // eslint-disable-next-line no-void
-    void (async () => {
-      try {
-        const clientCaps = lowLevelServer.getClientCapabilities?.() ?? {};
-        hooksService.start(lowLevelServer, { sampling: clientCaps.sampling != null });
-
-        await watcherService.start();
-
-        await mcpLog('info', 'server', 'Email MCP server started');
-
-        // Check for overdue scheduled emails on startup
-        try {
-          const result = await schedulerService.checkAndSend();
-          if (result.sent > 0) {
-            await mcpLog('info', 'scheduler', `Sent ${result.sent} overdue email(s) on startup`);
-          }
-        } catch {
-          // Non-fatal: scheduler check failure shouldn't prevent server start
-        }
-
-        // Periodic scheduler check every 60 seconds
-        schedulerInterval = setInterval(async () => {
-          try {
-            await schedulerService.checkAndSend();
-          } catch {
-            // Silent — don't spam logs
-          }
-        }, 60_000);
-      } catch (err) {
-        // Log to stderr — mcpLog may not be safe if init itself errored
-        process.stderr.write(
-          `[email-mcp] post-init error: ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-    })();
-  };
-
-  // Graceful shutdown
+  // Graceful shutdown.
   const shutdown = async () => {
-    if (schedulerInterval) clearInterval(schedulerInterval);
-    hooksService.stop();
-    await watcherService.stop();
-    await connections.closeAll();
-    await server.close();
+    if (background) await background.stop();
+    await services.connections.closeAll();
+    await handle.close();
   };
 
   process.on('SIGINT', shutdown);
@@ -181,6 +99,12 @@ async function main(): Promise<void> {
     case 'stdio':
       await runServer();
       break;
+
+    case 'http': {
+      const { default: runHttp } = await import('./cli/http.js');
+      await runHttp(process.argv.slice(3));
+      break;
+    }
 
     case 'setup': {
       const { default: runSetup } = await import('./cli/setup.js');

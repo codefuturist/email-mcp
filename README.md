@@ -8,7 +8,9 @@
 
 An MCP (Model Context Protocol) server providing comprehensive email capabilities via IMAP and SMTP.
 
-Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 47 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
+Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 49 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
+
+Built on the MCP TypeScript SDK v2 (spec revision 2026-07-28), it serves over **stdio** for local clients or **Streamable HTTP** for networked access — existing stdio configurations keep working unchanged.
 
 ## Highlights
 
@@ -26,6 +28,7 @@ Enables AI assistants to read, search, send, manage, schedule, and analyze email
 | Email analytics | ✅ | ❌ |
 | OAuth2 (Gmail / M365) | ✅ _experimental_ | ❌ |
 | Guided setup wizard | ✅ auto-detect | ❌ |
+| Streamable HTTP transport | ✅ | ❌ |
 
 ## Table of Contents
 
@@ -100,7 +103,7 @@ docker build -t ghcr.io/codefuturist/email-mcp .
 
 > **Tag convention:** Tags follow bare semver (no `v` prefix), matching Docker ecosystem standards (e.g. `node:24`, `nginx:1.25`). The `latest` tag is only updated on stable releases, never pre-releases.
 
-> **Note:** The server uses stdio transport. Config must be created on the host first
+> **Note:** By default, the server uses stdio transport. Config must be created on the host first
 > (via `npx @codefuturist/email-mcp setup` or manually) and mounted into the container.
 
 ## Usage
@@ -128,6 +131,8 @@ email-mcp test personal   # specific account
 ```
 
 ### Configure Your MCP Client
+
+The snippets below use the default **stdio** transport, best for local desktop clients. For networked or remote access over **Streamable HTTP**, see [Streamable HTTP (networked)](#streamable-http-networked) below.
 
 **Recommended — use the guided installer** (auto-detects Claude Desktop, VS Code, Cursor, Windsurf):
 
@@ -326,6 +331,58 @@ For MCP client configuration (e.g. Claude Desktop):
 ```
 </details>
 
+### Streamable HTTP (networked)
+
+By default the server speaks MCP over **stdio**, ideal for local desktop clients (see the snippets above). For networked or remote access, run it as a **Streamable HTTP** server instead:
+
+```bash
+email-mcp http --port 8080
+```
+
+This serves MCP at `http://127.0.0.1:8080/mcp`, with a health probe at `GET /healthz`.
+
+#### Flags & environment variables
+
+| Flag | Environment variable | Default | Description |
+|------|----------------------|---------|-------------|
+| `--host <addr>` | `EMAIL_MCP_HTTP_HOST` | `127.0.0.1` | Address to bind |
+| `--port <n>` | `EMAIL_MCP_HTTP_PORT` | `8080` | Port to listen on |
+| `--path <path>` | `EMAIL_MCP_HTTP_PATH` | `/mcp` | HTTP path serving MCP |
+| `--token <secret>` | `EMAIL_MCP_HTTP_TOKEN` | — | Require `Authorization: Bearer <secret>` on every request |
+| `--allowed-hosts a,b,c` | `EMAIL_MCP_HTTP_ALLOWED_HOSTS` | _loopback names + bind host_ | Comma-separated `Host` header allowlist (DNS-rebinding protection); `*` disables the check |
+| `--insecure` | — | `false` | Allow binding a non-loopback host without a token |
+
+#### Security
+
+- **Token auth** — When a token is set, every request must send `Authorization: Bearer <token>`.
+- **Non-loopback bind guard** — Binding a non-loopback host (e.g. `0.0.0.0`) **without** a token is refused unless `--insecure` is passed. Use `--insecure` only when TLS and authentication are terminated by an upstream reverse proxy.
+- **DNS-rebinding protection** — The `Host` header is validated against an allowlist (loopback names plus the bind host by default). Set `EMAIL_MCP_HTTP_ALLOWED_HOSTS` to your public domain, or `*` to disable the check when a proxy already enforces it.
+
+#### Client configuration
+
+For clients that support the Streamable HTTP transport:
+
+```json
+{
+  "mcpServers": {
+    "email": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8080/mcp"
+    }
+  }
+}
+```
+
+When a token is configured, add an `Authorization: Bearer <token>` header if your client supports custom headers.
+
+#### Docker
+
+```bash
+docker compose --profile http up
+```
+
+Requires `EMAIL_MCP_HTTP_TOKEN` to be set; the image `EXPOSE`s port `8080`.
+
 ### CLI Commands
 
 ```
@@ -333,6 +390,7 @@ email-mcp [command]
 
 Commands:
   stdio                     Run as MCP server over stdio (default)
+  http                      Run as MCP server over Streamable HTTP (networked)
   account list              List all configured accounts
   account add               Add a new email account interactively
   account edit [name]       Edit an existing account
@@ -642,7 +700,9 @@ Features:
 
 ## API
 
-### Tools (47)
+### Tools (49)
+
+> **Structured output:** `list_emails`, `search_emails`, `get_email_status`, and `list_mailboxes` also return machine-readable results (`outputSchema` + `structuredContent`) alongside the human-readable text, for clients that consume typed tool output.
 
 #### Read (14)
 

@@ -5,7 +5,7 @@
  * header chains. Returns messages in chronological order (or newest-first).
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type ImapService from '../services/imap.service.js';
@@ -67,40 +67,44 @@ function applyBodyFormat(
 // ---------------------------------------------------------------------------
 
 export default function registerThreadTools(server: McpServer, imapService: ImapService): void {
-  server.tool(
+  server.registerTool(
     'get_thread',
-    'Reconstruct a full email conversation thread by following References and In-Reply-To headers. ' +
-      'Returns all related messages. Does NOT mark emails as seen. ' +
-      'Use format="text" to strip HTML, or format="stripped" to also remove quoted replies. ' +
-      'Use newestFirst=true to show the most recent message in full and older messages as header-only summaries. ' +
-      'Use get_email first to obtain the message_id.',
     {
-      account: z.string().describe('Account name from list_accounts'),
-      message_id: z.string().describe('Message-ID header value (from get_email)'),
-      mailbox: z.string().default('INBOX').describe('Mailbox to search (default: INBOX)'),
-      format: z
-        .enum(['full', 'text', 'stripped'])
-        .default('full')
-        .describe(
-          'Body format: full=raw (default), text=plain text (strips HTML), stripped=plain text without quoted replies or signatures',
-        ),
-      maxLength: z
-        .number()
-        .int()
-        .min(100)
-        .optional()
-        .describe(
-          'Truncate each message body at this many characters. A hint shows how many characters remain.',
-        ),
-      newestFirst: z
-        .boolean()
-        .default(false)
-        .describe(
-          'When true, shows the newest message in full and older messages as header-only summaries. ' +
-            'Ideal for AI triage of long threads where only the latest reply matters.',
-        ),
+      title: 'Get thread',
+      description:
+        'Reconstruct a full email conversation thread by following References and In-Reply-To headers. ' +
+        'Returns all related messages. Does NOT mark emails as seen. ' +
+        'Use format="text" to strip HTML, or format="stripped" to also remove quoted replies. ' +
+        'Use newestFirst=true to show the most recent message in full and older messages as header-only summaries. ' +
+        'Use get_email first to obtain the message_id.',
+      inputSchema: z.object({
+        account: z.string().describe('Account name from list_accounts'),
+        message_id: z.string().describe('Message-ID header value (from get_email)'),
+        mailbox: z.string().default('INBOX').describe('Mailbox to search (default: INBOX)'),
+        format: z
+          .enum(['full', 'text', 'stripped'])
+          .default('full')
+          .describe(
+            'Body format: full=raw (default), text=plain text (strips HTML), stripped=plain text without quoted replies or signatures',
+          ),
+        maxLength: z
+          .number()
+          .int()
+          .min(100)
+          .optional()
+          .describe(
+            'Truncate each message body at this many characters. A hint shows how many characters remain.',
+          ),
+        newestFirst: z
+          .boolean()
+          .default(false)
+          .describe(
+            'When true, shows the newest message in full and older messages as header-only summaries. ' +
+              'Ideal for AI triage of long threads where only the latest reply matters.',
+          ),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ account, message_id: messageId, mailbox, format, maxLength, newestFirst }) => {
       try {
         const thread = await imapService.getThread(account, messageId, mailbox);
