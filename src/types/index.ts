@@ -137,10 +137,21 @@ export interface HooksConfig {
   calendarConfirm?: boolean;
 }
 
+/** Local mirror settings — see CacheConfigSchema for defaults and rationale. */
+export interface CacheConfig {
+  enabled: boolean;
+  mailboxes: string[];
+  windowDays: number;
+  bodyMessages: number;
+  maxSizeMb: number;
+  syncInterval: number;
+}
+
 export interface AppConfig {
   settings: {
     rateLimit: number;
     readOnly: boolean;
+    cache: CacheConfig;
     watcher: WatcherConfig;
     hooks: HooksConfig;
   };
@@ -155,8 +166,10 @@ export interface Mailbox {
   name: string;
   path: string;
   specialUse?: string;
-  totalMessages: number;
-  unseenMessages: number;
+  /** Undefined when the IMAP STATUS call failed — distinct from a genuinely empty mailbox. */
+  totalMessages?: number;
+  /** Undefined when the IMAP STATUS call failed — distinct from "nothing unread". */
+  unseenMessages?: number;
 }
 
 // ---------------------------------------------------------------------------

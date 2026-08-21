@@ -22,6 +22,8 @@ import type {
   QuotaInfo,
   SenderStat,
 } from '../types/index.js';
+import type { ReconnectEvent } from './event-bus.js';
+import eventBus from './event-bus.js';
 import type { LabelStrategy } from './label-strategy.js';
 import { detectLabelStrategy } from './label-strategy.js';
 
@@ -60,7 +62,9 @@ function extractAttachments(bodyStructure: unknown): AttachmentMeta[] {
     const params = (bs.dispositionParameters ?? bs.parameters ?? {}) as Record<string, string>;
     attachments.push({
       filename: params.filename ?? params.name ?? 'unnamed',
-      mimeType: `${bs.type ?? 'application'}/${bs.subtype ?? 'octet-stream'}`,
+      // `bs.type` is already a complete Content-Type; there is no subtype
+      // field to append.
+      mimeType: typeof bs.type === 'string' ? bs.type.toLowerCase() : 'application/octet-stream',
       size: (bs.size as number) ?? 0,
     });
   }
@@ -104,7 +108,14 @@ function findMimePartByFilename(
   return undefined;
 }
 
-function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
+/**
+ * Map a raw ImapFlow fetch result to `EmailMeta`.
+ *
+ * Exported so the IDLE watcher shares one definition — a second, slightly
+ * different implementation there previously produced inconsistent records for
+ * the same message.
+ */
+export function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
   const envelope = (msg.envelope ?? {}) as Record<string, unknown>;
   const flags = new Set((msg.flags ?? []) as string[]);
 
@@ -125,8 +136,18 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
     }
   }
 
+  // Every fetch in this service passes `{ uid: true }`, so a missing UID means
+  // the server broke protocol. Falling back to `msg.seq` would mint an id that
+  // looks like a UID but addresses a different message on every subsequent
+  // write — fail loudly instead.
+  if (typeof msg.uid !== 'number') {
+    throw new Error(
+      `IMAP server returned a message without a UID (seq ${String(msg.seq ?? 'unknown')})`,
+    );
+  }
+
   return {
-    id: String(msg.uid ?? msg.seq),
+    id: String(msg.uid),
     subject: (envelope.subject as string) ?? '(no subject)',
     from: parseAddress((envelope.from as Record<string, string>[])?.[0]),
     to: parseAddresses(envelope.to as Record<string, string>[]),
@@ -140,6 +161,81 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
     labels,
     preview,
   };
+}
+
+/** A displayable (non-attachment) text part discovered in the MIME tree. */
+interface TextPart {
+  /** IMAP part path, e.g. "1.1" */
+  path: string;
+  /** Content subtype: "plain" | "html" | … (derived from the full MIME type) */
+  subtype: string;
+  size: number;
+}
+
+/**
+ * Split an ImapFlow structure node's Content-Type.
+ *
+ * ImapFlow reports `type` as the complete Content-Type ("text/html") and has
+ * no `subtype` field at all — see MessageStructureObject in imap-flow.d.ts.
+ */
+function splitMimeType(type: unknown): { type: string; subtype: string } {
+  const full = typeof type === 'string' ? type.toLowerCase() : '';
+  const slash = full.indexOf('/');
+  if (slash < 0) return { type: full, subtype: '' };
+  return { type: full.slice(0, slash), subtype: full.slice(slash + 1) };
+}
+
+/**
+ * Collect every non-attachment text/* part in the MIME tree, in document order.
+ *
+ * Mirrors the traversal in `findMimePartByFilename` — part paths come from
+ * `bs.part` when the server supplies one, otherwise from the 1-based child
+ * index chain.
+ */
+function collectTextParts(bodyStructure: unknown, partPath = ''): TextPart[] {
+  if (!bodyStructure || typeof bodyStructure !== 'object') return [];
+
+  const bs = bodyStructure as Record<string, unknown>;
+  const effectivePath = (bs.part as string | undefined) ?? partPath;
+  const found: TextPart[] = [];
+
+  if (Array.isArray(bs.childNodes)) {
+    bs.childNodes.forEach((child, i) => {
+      const childPath = effectivePath ? `${effectivePath}.${i + 1}` : String(i + 1);
+      found.push(...collectTextParts(child, childPath));
+    });
+    return found;
+  }
+
+  // Leaf node. Attachments are never body content, even when text/*.
+  const { type, subtype } = splitMimeType(bs.type);
+  if (type === 'text' && bs.disposition !== 'attachment' && effectivePath) {
+    found.push({
+      path: effectivePath,
+      subtype,
+      size: typeof bs.size === 'number' ? bs.size : 0,
+    });
+  }
+
+  return found;
+}
+
+/**
+ * Choose which text part to download for an email's body, or `undefined` to
+ * skip the extra round trip and use the body already parsed from `source`.
+ *
+ * `parts` is in document order and excludes attachments.
+ *
+ * Current policy: prefer `text/plain`, else the first text part. Plain text is
+ * cheaper in agent context-window terms, which `docs/performance-roadmap.md`
+ * identifies as the real constraint.
+ *
+ * Known refinement, not yet implemented: some senders ship a near-empty plain
+ * part alongside the real content in HTML, where size-aware selection would
+ * pick better.
+ */
+function selectBodyPart(parts: TextPart[]): TextPart | undefined {
+  return parts.find((p) => p.subtype === 'plain') ?? parts[0];
 }
 
 async function messageToEmail(
@@ -173,7 +269,14 @@ async function messageToEmail(
       const body = raw.slice(headerEnd + 4);
       // Simple content type detection
       const contentType = headers['content-type'] ?? '';
-      if (contentType.includes('text/html')) {
+      // For a multipart message everything after the headers is boundary
+      // markers and per-part headers, not content. Treating it as a body
+      // surfaces raw MIME to the caller — and because the tool layer prefers
+      // bodyText over stripping bodyHtml, it hides the real content entirely.
+      // The individual part is downloaded below instead.
+      if (contentType.startsWith('multipart/')) {
+        // Leave both undefined; the part download decides.
+      } else if (contentType.includes('text/html')) {
         bodyHtml = body;
       } else {
         bodyText = body;
@@ -181,19 +284,32 @@ async function messageToEmail(
     }
   }
 
-  // Try to get text/html parts via download if body parsing was simple
-  try {
-    const textPart = await client.download(String(uid), '1', { uid: true });
-    if (textPart?.content) {
-      const chunks: Buffer[] = [];
-      // eslint-disable-next-line no-restricted-syntax
-      for await (const chunk of textPart.content) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  // `source` above yields the raw message, which for a multipart mail is MIME
+  // envelope noise rather than a readable body. Fetch the specific text part
+  // instead — but only when there is a distinct one to fetch, since a
+  // single-part message was already fully parsed above.
+  const textParts = collectTextParts(msg.bodyStructure);
+  const chosen = textParts.length > 0 ? selectBodyPart(textParts) : undefined;
+
+  if (chosen) {
+    try {
+      const part = await client.download(String(uid), chosen.path, { uid: true });
+      if (part?.content) {
+        const chunks: Buffer[] = [];
+        // eslint-disable-next-line no-restricted-syntax
+        for await (const chunk of part.content) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const decoded = Buffer.concat(chunks).toString('utf-8');
+        if (chosen.subtype === 'html') {
+          bodyHtml = decoded;
+        } else {
+          bodyText = decoded;
+        }
       }
-      bodyText = Buffer.concat(chunks).toString('utf-8');
+    } catch {
+      // Part may not exist — keep whatever `source` parsing produced.
     }
-  } catch {
-    // Part may not exist
   }
 
   return {
@@ -219,7 +335,45 @@ export default class ImapService {
 
   private labelStrategyPending = new Map<string, Promise<LabelStrategy>>();
 
-  constructor(private connections: IConnectionManager) {}
+  private readonly onReconnect: (event: ReconnectEvent) => void;
+
+  constructor(private connections: IConnectionManager) {
+    // The label strategy is probed from server capabilities and folder layout,
+    // so it is only valid for the connection that produced it. A reconnect may
+    // reach a different server for the same account — drop the memo and
+    // re-detect on next use.
+    this.onReconnect = ({ account }) => {
+      this.labelStrategies.delete(account);
+      this.labelStrategyPending.delete(account);
+    };
+    eventBus.on('imap:reconnect', this.onReconnect);
+  }
+
+  /**
+   * Detach from the event bus.
+   *
+   * The server holds a single long-lived instance, so this matters mainly for
+   * tests and for any future code that builds a service graph per request —
+   * without it each instance leaks a listener on the shared bus.
+   */
+  dispose(): void {
+    eventBus.off('imap:reconnect', this.onReconnect);
+  }
+
+  /**
+   * Lock a caller-supplied mailbox path.
+   *
+   * Trims and rejects the IMAP wildcards `*` and `%` first. Prefer this over
+   * `client.getMailboxLock()` for any path that originated outside this
+   * process — it keeps validation from drifting method by method, and
+   * normalizes the path so " INBOX " and "INBOX" address one mailbox.
+   *
+   * Paths returned by `client.list()` are server-supplied and already valid;
+   * those may be locked directly.
+   */
+  private static lockMailbox(client: ImapFlow, mailbox: string) {
+    return client.getMailboxLock(sanitizeMailboxName(mailbox));
+  }
 
   private async getLabelStrategy(accountName: string): Promise<LabelStrategy> {
     const cached = this.labelStrategies.get(accountName);
@@ -259,8 +413,8 @@ export default class ImapService {
           name: mb.name,
           path: mb.path,
           specialUse: mb.specialUse ?? undefined,
-          totalMessages: status.messages ?? 0,
-          unseenMessages: status.unseen ?? 0,
+          totalMessages: status.messages,
+          unseenMessages: status.unseen,
         };
       }),
     );
@@ -269,14 +423,17 @@ export default class ImapService {
       if (result.status === 'fulfilled') {
         return result.value;
       }
-      // Fallback for folders that don't support STATUS (e.g. \Noselect)
+      // STATUS failed — either the folder doesn't support it (e.g. \Noselect) or
+      // the connection is degraded. Leave the counts undefined rather than
+      // reporting 0: a caller (or the cache) must not mistake this for an empty
+      // mailbox.
       const mb = mailboxes[idx];
       return {
         name: mb.name,
         path: mb.path,
         specialUse: mb.specialUse ?? undefined,
-        totalMessages: 0,
-        unseenMessages: 0,
+        totalMessages: undefined,
+        unseenMessages: undefined,
       };
     });
   }
@@ -306,7 +463,7 @@ export default class ImapService {
     const page = options.page ?? 1;
     const pageSize = options.pageSize ?? 20;
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       // Build search criteria
       const search: Record<string, unknown> = {};
@@ -451,7 +608,7 @@ export default class ImapService {
     const client = await this.connections.getImapClient(accountName);
     const uid = parseInt(emailId, 10);
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       const msg = await client.fetchOne(
         String(uid),
@@ -513,7 +670,7 @@ export default class ImapService {
     const pageSize = options.pageSize ?? 20;
     const sanitizedQuery = query ? sanitizeSearchQuery(query) : '';
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       // Build search criteria — base query OR across subject/from/body
       const baseCriteria: Record<string, unknown> = sanitizedQuery
@@ -701,7 +858,7 @@ export default class ImapService {
 
     // 1. Fetch Message-ID from the source mailbox
     let messageId: string | undefined;
-    const srcLock = await client.getMailboxLock(sourceMailbox);
+    const srcLock = await ImapService.lockMailbox(client, sourceMailbox);
     try {
       const msg = await client.fetchOne(emailId, { headers: true }, { uid: true });
       // biome-ignore lint/complexity/useOptionalChain: optional chain breaks TS type narrowing for union with false
@@ -869,7 +1026,7 @@ export default class ImapService {
     action: 'mark_read' | 'mark_unread' | 'flag' | 'unflag',
   ): Promise<BulkResult> {
     const client = await this.connections.getImapClient(accountName);
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     const result: BulkResult = {
       total: ids.length,
       succeeded: 0,
@@ -914,8 +1071,11 @@ export default class ImapService {
     destination: string,
   ): Promise<BulkResult> {
     const client = await this.connections.getImapClient(accountName);
+    // The destination is never locked, so it needs validating on its own —
+    // it goes straight to MOVE as a mailbox path.
+    const safeDestination = sanitizeMailboxName(destination);
     await ImapService.assertRealMailbox(client, mailbox);
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     const result: BulkResult = {
       total: ids.length,
       succeeded: 0,
@@ -924,7 +1084,7 @@ export default class ImapService {
     };
     try {
       const range = ids.join(',');
-      const ok = await client.messageMove(range, destination, { uid: true });
+      const ok = await client.messageMove(range, safeDestination, { uid: true });
       if (ok) {
         result.succeeded = ids.length;
       } else {
@@ -956,7 +1116,7 @@ export default class ImapService {
     };
 
     if (permanent) {
-      const lock = await client.getMailboxLock(mailbox);
+      const lock = await ImapService.lockMailbox(client, mailbox);
       try {
         const range = ids.join(',');
         const ok = await client.messageDelete(range, { uid: true });
@@ -978,7 +1138,7 @@ export default class ImapService {
       const trash = mailboxes.find((mb) => mb.specialUse === '\\Trash');
       const trashPath = trash?.path ?? 'Trash';
 
-      const lock = await client.getMailboxLock(mailbox);
+      const lock = await ImapService.lockMailbox(client, mailbox);
       try {
         const range = ids.join(',');
         const ok = await client.messageMove(range, trashPath, { uid: true });
@@ -1082,7 +1242,7 @@ export default class ImapService {
   /** Delete a draft after it has been sent. */
   async deleteDraft(accountName: string, emailId: number, mailbox: string): Promise<void> {
     const client = await this.connections.getImapClient(accountName);
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       await client.messageDelete(String(emailId), { uid: true });
     } finally {
@@ -1128,7 +1288,7 @@ export default class ImapService {
     const client = await this.connections.getImapClient(accountName);
     const uid = parseInt(emailId, 10);
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       // Fetch bodyStructure to find the MIME part
       const msg = await client.fetchOne(
@@ -1216,7 +1376,7 @@ export default class ImapService {
     const client = await this.connections.getImapClient(accountName);
     const uid = parseInt(emailId, 10);
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     let attachmentMetas: AttachmentMeta[] = [];
     try {
       const msg = await client.fetchOne(
@@ -1282,7 +1442,7 @@ export default class ImapService {
   }> {
     const MAX_THREAD_MESSAGES = 50;
     const client = await this.connections.getImapClient(accountName);
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       // Collect all Message-IDs in the thread
       const targetMsgIds = new Set<string>([messageId]);
@@ -1444,7 +1604,7 @@ export default class ImapService {
     const mailbox = options.mailbox ?? 'INBOX';
     const limit = Math.min(options.limit ?? 100, 500);
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       // Search for all messages, take the latest N
       const searchResult = await client.search({ all: true }, { uid: true });
@@ -1531,7 +1691,7 @@ export default class ImapService {
     else if (period === 'week') since.setDate(since.getDate() - 7);
     else since.setMonth(since.getMonth() - 1);
 
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
     try {
       // Date-range search
       const uids: number[] = await client
@@ -1693,36 +1853,42 @@ export default class ImapService {
   /* eslint-disable no-await-in-loop, no-restricted-syntax -- Sequential IMAP fetch required */
   async getCalendarParts(accountName: string, mailbox: string, emailId: string): Promise<string[]> {
     const client = await this.connections.getImapClient(accountName);
-    const lock = await client.getMailboxLock(mailbox);
+    const lock = await ImapService.lockMailbox(client, mailbox);
 
     try {
       const icsContents: string[] = [];
 
-      // Fetch body structure
+      // Drain the structure fetch completely before issuing any further
+      // command. ImapFlow runs one command at a time, so starting the part
+      // fetch inside this loop deadlocks: the outer stream cannot finish until
+      // the inner one does, and the inner one cannot start until the outer
+      // finishes.
+      const partIds: string[] = [];
       for await (const msg of client.fetch(
         emailId,
         { uid: true, bodyStructure: true },
         { uid: true },
       )) {
         const structure = (msg as unknown as Record<string, unknown>).bodyStructure;
-        const parts = this.findCalendarParts(structure);
+        partIds.push(...this.findCalendarParts(structure));
+      }
 
-        // Fetch each calendar part
-        for (const partId of parts) {
-          for await (const partMsg of client.fetch(
-            emailId,
-            { uid: true, bodyParts: [partId] },
-            { uid: true },
-          )) {
-            const bodyParts = (partMsg as unknown as Record<string, unknown>).bodyParts as
-              | Map<string, Buffer>
-              | undefined;
-            if (bodyParts) {
-              bodyParts.forEach((buf) => {
-                icsContents.push(buf.toString('utf-8'));
-              });
-            }
-          }
+      // Download each part, one command at a time.
+      //
+      // `download()` rather than `fetch({ bodyParts })`: calendar parts are
+      // almost always base64 or quoted-printable, and a bodyParts fetch hands
+      // back the still-encoded bytes. download() applies the transfer decoding,
+      // so the ICS parser gets text it can actually read.
+      for (const partId of partIds) {
+        const part = await client.download(emailId, partId, { uid: true });
+        if (!part?.content) continue;
+
+        const chunks: Buffer[] = [];
+        for await (const chunk of part.content) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        if (chunks.length > 0) {
+          icsContents.push(Buffer.concat(chunks).toString('utf-8'));
         }
       }
 
@@ -1741,8 +1907,7 @@ export default class ImapService {
     const s = structure as Record<string, unknown>;
     const parts: string[] = [];
 
-    const type = (s.type as string | undefined)?.toLowerCase() ?? '';
-    const subtype = (s.subtype as string | undefined)?.toLowerCase() ?? '';
+    const { type, subtype } = splitMimeType(s.type);
     const disposition = (s.disposition as string | undefined)?.toLowerCase() ?? '';
 
     // Check for text/calendar part
