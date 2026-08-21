@@ -18,11 +18,20 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
     'Send a new email. Supports plain text or HTML body, CC, and BCC.',
     {
       account: z.string().describe('Account name from list_accounts'),
-      to: z.array(z.string().email()).min(1).describe('Recipient email addresses'),
+      to: z
+        .array(z.email({ pattern: z.regexes.html5Email }))
+        .min(1)
+        .describe('Recipient email addresses'),
       subject: z.string().describe('Email subject'),
       body: z.string().describe('Email body content'),
-      cc: z.array(z.string().email()).optional().describe('CC recipients'),
-      bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
+      cc: z
+        .array(z.email({ pattern: z.regexes.html5Email }))
+        .optional()
+        .describe('CC recipients'),
+      bcc: z
+        .array(z.email({ pattern: z.regexes.html5Email }))
+        .optional()
+        .describe('BCC recipients'),
       html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
@@ -131,9 +140,15 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       account: z.string().describe('Account name from list_accounts'),
       emailId: z.string().describe('Email ID to forward (from list_emails or get_email)'),
       mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
-      to: z.array(z.string().email()).min(1).describe('Forward to these recipients'),
+      to: z
+        .array(z.email({ pattern: z.regexes.html5Email }))
+        .min(1)
+        .describe('Forward to these recipients'),
       body: z.string().optional().describe('Additional message above the forwarded content'),
-      cc: z.array(z.string().email()).optional().describe('CC recipients'),
+      cc: z
+        .array(z.email({ pattern: z.regexes.html5Email }))
+        .optional()
+        .describe('CC recipients'),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
