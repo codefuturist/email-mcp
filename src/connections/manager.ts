@@ -12,6 +12,7 @@ import type { Transporter } from 'nodemailer';
 import nodemailer from 'nodemailer';
 import { mcpLog } from '../logging.js';
 
+import eventBus from '../services/event-bus.js';
 import type OAuthService from '../services/oauth.service.js';
 import type { AccountConfig } from '../types/index.js';
 import type { IConnectionManager } from './types.js';
@@ -72,6 +73,11 @@ export default class ConnectionManager implements IConnectionManager {
       } catch {
         /* ignore */
       }
+      // Announce the replacement. A new connection may be talking to a
+      // different server, or to a mailbox that has been recreated since —
+      // so capability probes, per-account memos and any cached UIDVALIDITY
+      // derived from the old connection must be revalidated.
+      eventBus.emit('imap:reconnect', { account: accountName });
     }
 
     const account = this.getAccount(accountName);

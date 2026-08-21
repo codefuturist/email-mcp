@@ -9,7 +9,7 @@
  * - Falls back to logging if sampling is unavailable
  */
 
-import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import type { Server } from '@modelcontextprotocol/server';
 import { mcpLog } from '../logging.js';
 import type { EmailMeta, HookRule, HooksConfig } from '../types/index.js';
 import type { NewEmailEvent } from './event-bus.js';
@@ -87,7 +87,14 @@ export default class HooksService {
 
   private lowLevelServer: Server | null = null;
 
-  private samplingSupported = false;
+  /**
+   * Latches to `true` once a sampling request fails structurally (the client
+   * has no sampling capability, or is a 2026-07-28-era connection where the
+   * server→client request channel was removed — SEP-2577). Subsequent batches
+   * then skip straight to notify instead of re-attempting a doomed request.
+   * Transient failures do not latch.
+   */
+  private samplingUnavailable = false;
 
   private pendingEmails: BatchEmail[] = [];
 
@@ -128,11 +135,15 @@ export default class HooksService {
 
   /**
    * Start listening for email events.
-   * Call after MCP server is connected so we can access the low-level server.
+   *
+   * Pass the low-level MCP `Server` (from `mcpServer.server`) when one is
+   * available — it is used for resource-update notifications and, on legacy
+   * connections, opportunistic AI-triage sampling. Pass `null` for transports
+   * with no persistent connection (stateless HTTP), where notifications and
+   * sampling do not apply and triage degrades to notify.
    */
-  start(lowLevelServer: Server, clientCapabilities: { sampling?: boolean }): void {
+  start(lowLevelServer: Server | null): void {
     this.lowLevelServer = lowLevelServer;
-    this.samplingSupported = clientCapabilities.sampling === true;
 
     if (this.config.onNewEmail === 'none') return;
 
@@ -146,11 +157,14 @@ export default class HooksService {
     }, 60_000);
 
     const ruleCount = this.config.rules.length;
+    const triageMode =
+      this.config.onNewEmail === 'triage'
+        ? 'triage (sampling opportunistic)'
+        : this.config.onNewEmail;
     mcpLog(
       'info',
       'hooks',
-      `Hooks active: mode=${this.config.onNewEmail}, preset=${this.config.preset}, ` +
-        `rules=${ruleCount}, sampling=${this.samplingSupported ? 'yes' : 'no'}`,
+      `Hooks active: mode=${triageMode}, preset=${this.config.preset}, rules=${ruleCount}`,
     ).catch(() => {});
   }
 
@@ -214,7 +228,7 @@ export default class HooksService {
 
     // AI triage for remaining emails
     if (needsTriage.length > 0) {
-      if (this.config.onNewEmail === 'triage' && this.samplingSupported) {
+      if (this.config.onNewEmail === 'triage' && !this.samplingUnavailable) {
         await this.triageBatch(needsTriage);
       } else {
         await this.notifyBatch(needsTriage);
@@ -279,18 +293,24 @@ export default class HooksService {
     // Apply flag
     if (actions.flag) {
       try {
-        await this.imapService.setFlags(email.account, email.mailbox, email.meta.id, 'flag');
-      } catch {
-        await mcpLog('warning', 'hooks', `Could not flag email ${email.meta.id}`);
+        await this.imapService.setFlags(email.account, email.meta.id, email.mailbox, 'flag');
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await mcpLog('warning', 'hooks', `Could not flag email ${email.meta.id}: ${errMsg}`);
       }
     }
 
     // Mark read
     if (actions.markRead) {
       try {
-        await this.imapService.setFlags(email.account, email.mailbox, email.meta.id, 'read');
-      } catch {
-        await mcpLog('warning', 'hooks', `Could not mark email ${email.meta.id} as read`);
+        await this.imapService.setFlags(email.account, email.meta.id, email.mailbox, 'read');
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await mcpLog(
+          'warning',
+          'hooks',
+          `Could not mark email ${email.meta.id} as read: ${errMsg}`,
+        );
       }
     }
 
@@ -401,7 +421,19 @@ export default class HooksService {
       await this.applyTriageResults(emails, triageResults);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      await mcpLog('warning', 'hooks', `Sampling failed: ${errMsg} — falling back to notify`);
+      // Latch off when the failure is structural (no sampling capability, or a
+      // 2026-07-28-era connection with no server→client request channel) so we
+      // stop re-attempting a doomed request every batch. Transient errors don't.
+      if (/sampl|capab|2026|not support|unsupported|method not found|-3260|-3204/i.test(errMsg)) {
+        this.samplingUnavailable = true;
+        await mcpLog(
+          'notice',
+          'hooks',
+          'AI triage sampling is unavailable on this client — switching to notify for this session',
+        );
+      } else {
+        await mcpLog('warning', 'hooks', `Sampling failed: ${errMsg} — falling back to notify`);
+      }
       await this.notifyBatch(emails);
     }
   }
@@ -449,9 +481,10 @@ export default class HooksService {
     // Auto-flag
     if (this.config.autoFlag && triage.flag) {
       try {
-        await this.imapService.setFlags(email.account, email.mailbox, email.meta.id, 'flag');
-      } catch {
-        await mcpLog('warning', 'hooks', `Could not flag email ${email.meta.id}`);
+        await this.imapService.setFlags(email.account, email.meta.id, email.mailbox, 'flag');
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await mcpLog('warning', 'hooks', `Could not flag email ${email.meta.id}: ${errMsg}`);
       }
     }
 

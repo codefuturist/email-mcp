@@ -14,6 +14,7 @@ import { ImapFlow } from 'imapflow';
 import { mcpLog } from '../logging.js';
 import type { AccountConfig, EmailMeta, WatcherConfig } from '../types/index.js';
 import eventBus from './event-bus.js';
+import { messageToEmailMeta } from './imap.service.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,20 +37,6 @@ export interface WatcherStatus {
   connected: boolean;
   lastSeenUid: number;
 }
-
-// ---------------------------------------------------------------------------
-// System flags excluded from label extraction
-// ---------------------------------------------------------------------------
-
-const SYSTEM_FLAGS = new Set([
-  '\\Seen',
-  '\\Answered',
-  '\\Flagged',
-  '\\Deleted',
-  '\\Draft',
-  '\\Recent',
-  '\\*',
-]);
 
 // ---------------------------------------------------------------------------
 // WatcherService
@@ -181,6 +168,30 @@ export default class WatcherService {
         }
       });
 
+      // Messages removed — by us or by another client. Republished so caches
+      // and subscribers can drop the message rather than serving a deleted one.
+      client.on('expunge', (data) => {
+        eventBus.emit('email:expunge', {
+          account: state.account.name,
+          mailbox: state.folder,
+          uid: data.uid,
+          seq: data.seq,
+        });
+      });
+
+      // Flag changes are the most common out-of-band mutation: marking a
+      // message read in a phone client must not leave this process convinced
+      // it is still unread.
+      client.on('flags', (data) => {
+        eventBus.emit('email:flags', {
+          account: state.account.name,
+          mailbox: state.folder,
+          uid: data.uid,
+          seq: data.seq,
+          flags: [...data.flags],
+        });
+      });
+
       // Auto-reconnect on close
       client.on('close', () => {
         this.updateState(key, { lock: null, client: null });
@@ -243,14 +254,20 @@ export default class WatcherService {
       let maxUid = state.lastSeenUid;
 
       // eslint-disable-next-line no-restricted-syntax -- need sequential async iteration
-      for await (const msg of state.client.fetch(searchRange, {
-        uid: true,
-        envelope: true,
-        flags: true,
-        bodyStructure: true,
-      })) {
+      for await (const msg of state.client.fetch(
+        searchRange,
+        {
+          uid: true,
+          envelope: true,
+          flags: true,
+          bodyStructure: true,
+        },
+        // Third arg is what makes `searchRange` a UID range. The `uid` in the
+        // query above only asks for the UID to be included in the response.
+        { uid: true },
+      )) {
         if (msg.uid > state.lastSeenUid) {
-          emails.push(WatcherService.buildEmailMeta(msg));
+          emails.push(messageToEmailMeta(msg as unknown as Record<string, unknown>));
           maxUid = Math.max(maxUid, msg.uid);
         }
       }
@@ -276,47 +293,5 @@ export default class WatcherService {
       const errMsg = err instanceof Error ? err.message : String(err);
       await mcpLog('warning', 'watcher', `Failed to fetch new emails: ${errMsg}`);
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // Helpers
-  // -------------------------------------------------------------------------
-
-  private static buildEmailMeta(msg: {
-    uid: number;
-    flags?: Set<string>;
-    envelope?: {
-      subject?: string;
-      from?: { name?: string; address?: string }[];
-      to?: { name?: string; address?: string }[];
-      date?: Date;
-    };
-    bodyStructure?: unknown;
-  }): EmailMeta {
-    const flags = msg.flags ?? new Set<string>();
-    const labels = [...flags].filter((f) => !SYSTEM_FLAGS.has(f));
-
-    const from = msg.envelope?.from?.[0];
-    const to = msg.envelope?.to ?? [];
-
-    return {
-      id: String(msg.uid),
-      subject: msg.envelope?.subject ?? '(no subject)',
-      from: { name: from?.name, address: from?.address ?? '' },
-      to: to.map((a) => ({ name: a.name, address: a.address ?? '' })),
-      date: msg.envelope?.date?.toISOString() ?? new Date().toISOString(),
-      seen: flags.has('\\Seen'),
-      flagged: flags.has('\\Flagged'),
-      answered: flags.has('\\Answered'),
-      hasAttachments: WatcherService.hasAttachments(msg.bodyStructure),
-      labels,
-    };
-  }
-
-  private static hasAttachments(bodyStructure: unknown): boolean {
-    if (!bodyStructure || typeof bodyStructure !== 'object') return false;
-    const bs = bodyStructure as { disposition?: string; childNodes?: unknown[] };
-    if (bs.disposition === 'attachment') return true;
-    return bs.childNodes?.some((child) => WatcherService.hasAttachments(child)) ?? false;
   }
 }
