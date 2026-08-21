@@ -26,13 +26,19 @@ export default function registerDraftTools(
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
         to: z
-          .array(z.string().email())
+          .array(z.email({ pattern: z.regexes.html5Email }))
           .default([])
           .describe('Recipient email addresses (can be empty for drafts)'),
         subject: z.string().describe('Email subject'),
         body: z.string().describe('Email body content'),
-        cc: z.array(z.string().email()).optional().describe('CC recipients'),
-        bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
+        cc: z
+          .array(z.email({ pattern: z.regexes.html5Email }))
+          .optional()
+          .describe('CC recipients'),
+        bcc: z
+          .array(z.email({ pattern: z.regexes.html5Email }))
+          .optional()
+          .describe('BCC recipients'),
         html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
         in_reply_to: z.string().optional().describe('Message-ID for threading (from get_email)'),
       }),
