@@ -25,6 +25,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.config.integration.ts",
+    "smoke": "tsx scripts/e2e-smoke.mts",
     "test:all": "vitest run && vitest run --config vitest.config.integration.ts",
     "check": "biome check src/",
     "report": "mkdir -p reports && biome check src/ --reporter=json > reports/biome.json 2>&1; actionlint -format '{{json .}}' > reports/actionlint.json 2>&1; pnpm test",

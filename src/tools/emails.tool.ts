@@ -246,7 +246,10 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
         }
 
         parts.push(`Date:   ${email.date}`);
-        parts.push(`ID:     ${email.messageId}`);
+        // Labelled in full because this output also carries the UID used as
+        // `emailId`; "ID" alone leaves the caller guessing which identifier
+        // get_thread's `message_id` wants.
+        parts.push(`Message-ID: ${email.messageId}`);
 
         if (email.inReplyTo) {
           parts.push(`Reply:  ${email.inReplyTo}`);

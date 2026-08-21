@@ -302,7 +302,13 @@ export default class SyncEngine {
           baseline,
         );
 
-        result.removed += await this.reconcileDeletions(client, account, mailbox, uidValidity);
+        result.removed += await this.reconcileDeletions(
+          client,
+          account,
+          mailbox,
+          uidValidity,
+          info.exists,
+        );
 
         this.store.putMailboxState({
           account,
@@ -392,12 +398,27 @@ export default class SyncEngine {
     account: string,
     mailbox: string,
     uidValidity: string,
+    exists: number | undefined,
   ): Promise<number> {
     const serverUids = (await client.search({ all: true }, { uid: true })) as number[] | false;
 
     // A failed SEARCH returns false. Treating that as "the mailbox is empty"
     // would delete the entire mirror on a transient error.
     if (!Array.isArray(serverUids)) return 0;
+
+    // SEARCH ALL and the SELECT message count describe the same mailbox, so
+    // they must agree. They disagree while a server is rebuilding its index —
+    // observed on a live server returning zero UIDs for a mailbox SELECT
+    // reported as full. Acting on that deletes the entire mirror for a mailbox
+    // that is perfectly intact, so leave deletions for a later sync instead.
+    if (typeof exists === 'number' && serverUids.length !== exists) {
+      await mcpLog(
+        'warning',
+        'cache',
+        `Skipping deletion pass for ${account}/${mailbox}: SEARCH returned ${serverUids.length} UID(s) but the mailbox reports ${exists} message(s)`,
+      );
+      return 0;
+    }
 
     const live = new Set(serverUids);
     const cached = this.store.listAllUids(account, mailbox, uidValidity);

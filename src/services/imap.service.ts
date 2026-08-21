@@ -22,6 +22,7 @@ import type {
   QuotaInfo,
   SenderStat,
 } from '../types/index.js';
+import { imapCommand } from '../utils/imap-error.js';
 import type { ReconnectEvent } from './event-bus.js';
 import eventBus from './event-bus.js';
 import type { LabelStrategy } from './label-strategy.js';
@@ -385,7 +386,11 @@ export default class ImapService {
    * those may be locked directly.
    */
   private static lockMailbox(client: ImapFlow, mailbox: string) {
-    return client.getMailboxLock(sanitizeMailboxName(mailbox));
+    const path = sanitizeMailboxName(mailbox);
+    // Every read and write opens a mailbox first, so this is the most common
+    // place a server refusal surfaces — and the least useful one to report as
+    // a bare "Command failed".
+    return imapCommand(`Opening mailbox "${path}"`, () => client.getMailboxLock(path));
   }
 
   private async getLabelStrategy(accountName: string): Promise<LabelStrategy> {
@@ -950,7 +955,9 @@ export default class ImapService {
     await ImapService.assertRealMailbox(client, safeSource);
     const lock = await client.getMailboxLock(safeSource);
     try {
-      const ok = await client.messageMove(emailId, safeDest, { uid: true });
+      const ok = await imapCommand(`Moving message to "${safeDest}"`, () =>
+        client.messageMove(emailId, safeDest, { uid: true }),
+      );
       if (!ok) {
         throw new Error(`IMAP server rejected the move from "${safeSource}" to "${safeDest}".`);
       }
@@ -986,7 +993,9 @@ export default class ImapService {
 
       const lock = await client.getMailboxLock(safeMailbox);
       try {
-        const ok = await client.messageMove(emailId, trashPath, { uid: true });
+        const ok = await imapCommand(`Moving message to "${trashPath}"`, () =>
+          client.messageMove(emailId, trashPath, { uid: true }),
+        );
         if (!ok) {
           throw new Error('IMAP server rejected the move to Trash.');
         }
@@ -1100,7 +1109,9 @@ export default class ImapService {
     };
     try {
       const range = ids.join(',');
-      const ok = await client.messageMove(range, safeDestination, { uid: true });
+      const ok = await imapCommand(`Moving messages to "${safeDestination}"`, () =>
+        client.messageMove(range, safeDestination, { uid: true }),
+      );
       if (ok) {
         result.succeeded = ids.length;
       } else {
@@ -1157,7 +1168,9 @@ export default class ImapService {
       const lock = await ImapService.lockMailbox(client, mailbox);
       try {
         const range = ids.join(',');
-        const ok = await client.messageMove(range, trashPath, { uid: true });
+        const ok = await imapCommand(`Moving messages to "${trashPath}"`, () =>
+          client.messageMove(range, trashPath, { uid: true }),
+        );
         if (ok) {
           result.succeeded = ids.length;
         } else {
@@ -1218,10 +1231,9 @@ export default class ImapService {
 
     const rawMessage = `${headers.join('\r\n')}\r\n\r\n${options.body}`;
 
-    const appendResult = await client.append(draftsPath, Buffer.from(rawMessage), [
-      '\\Draft',
-      '\\Seen',
-    ]);
+    const appendResult = await imapCommand(`Saving draft to "${draftsPath}"`, () =>
+      client.append(draftsPath, Buffer.from(rawMessage), ['\\Draft', '\\Seen']),
+    );
 
     return {
       id: (appendResult as unknown as { uid?: number }).uid ?? 0,
@@ -1272,17 +1284,19 @@ export default class ImapService {
 
   async createMailbox(accountName: string, folderPath: string): Promise<void> {
     const client = await this.connections.getImapClient(accountName);
-    await client.mailboxCreate(folderPath);
+    await imapCommand(`Creating mailbox "${folderPath}"`, () => client.mailboxCreate(folderPath));
   }
 
   async renameMailbox(accountName: string, folderPath: string, newPath: string): Promise<void> {
     const client = await this.connections.getImapClient(accountName);
-    await client.mailboxRename(folderPath, newPath);
+    await imapCommand(`Renaming mailbox "${folderPath}" to "${newPath}"`, () =>
+      client.mailboxRename(folderPath, newPath),
+    );
   }
 
   async deleteMailbox(accountName: string, folderPath: string): Promise<void> {
     const client = await this.connections.getImapClient(accountName);
-    await client.mailboxDelete(folderPath);
+    await imapCommand(`Deleting mailbox "${folderPath}"`, () => client.mailboxDelete(folderPath));
   }
 
   // -------------------------------------------------------------------------
@@ -1563,6 +1577,12 @@ export default class ImapService {
       const range = uidList.join(',');
       const messages: Email[] = [];
 
+      // Collect the whole fetch before converting any of it. messageToEmail
+      // downloads a body part, and ImapFlow runs one command at a time — so
+      // converting inside this loop deadlocks the connection: the stream can't
+      // finish until the download does, and the download can't start until the
+      // stream finishes.
+      const rawMessages: Record<string, unknown>[] = [];
       // eslint-disable-next-line no-restricted-syntax
       for await (const msg of client.fetch(
         range,
@@ -1571,13 +1591,20 @@ export default class ImapService {
           envelope: true,
           flags: true,
           bodyStructure: true,
-          source: true,
+          // Headers, not source: a thread caps at 50 messages, and pulling
+          // full sources means transferring 50 entire messages — attachments
+          // included — to render what is mostly a summary.
+          headers: true,
         },
         { uid: true },
       )) {
-        const raw = msg as unknown as Record<string, unknown>;
-        const uid = raw.uid as number;
-        messages.push(await messageToEmail(raw, client, uid));
+        rawMessages.push(msg as unknown as Record<string, unknown>);
+      }
+
+      // eslint-disable-next-line no-restricted-syntax
+      for (const raw of rawMessages) {
+        // eslint-disable-next-line no-await-in-loop
+        messages.push(await messageToEmail(raw, client, raw.uid as number));
       }
 
       // Sort chronologically

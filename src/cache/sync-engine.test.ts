@@ -240,13 +240,16 @@ describe('SyncEngine', () => {
       engine = build();
       client.fetch.mockImplementation(messagesFrom({ uid: 1 }, { uid: 2 }, { uid: 3 }));
       client.search.mockResolvedValue([1, 2, 3]);
+      client.mailbox.exists = 3;
       await engine.syncMailbox('work', 'INBOX');
 
       // uid 2 was deleted by another client. Without a UID-set diff a
       // baseline-tier server gives no signal at all, and the mirror would
-      // keep serving a message that no longer exists.
+      // keep serving a message that no longer exists. `exists` moves with the
+      // search result, as it does on a server that is not mid-resync.
       client.fetch.mockImplementation(messagesFrom());
       client.search.mockResolvedValue([1, 3]);
+      client.mailbox.exists = 2;
       await engine.syncMailbox('work', 'INBOX');
 
       expect(store.getMessage('work', 'INBOX', 2, '100')).toBeUndefined();
@@ -300,6 +303,57 @@ describe('SyncEngine', () => {
   // -------------------------------------------------------------------------
   // Resilience
   // -------------------------------------------------------------------------
+
+  describe('deletion reconciliation safety', () => {
+    async function seedThree(): Promise<void> {
+      client.fetch.mockImplementation(messagesFrom({ uid: 1 }, { uid: 2 }, { uid: 3 }));
+      client.search.mockResolvedValue([1, 2, 3]);
+      client.mailbox.exists = 3;
+      await engine.syncMailbox('work', 'INBOX');
+    }
+
+    it('does not purge the mirror when the server reports an empty mailbox it should not', async () => {
+      engine = build();
+      await seedThree();
+      expect(store.countMessages('work', 'INBOX')).toBe(3);
+
+      // Observed against a real server mid-resync: SEARCH returns nothing
+      // while SELECT still reports messages present. Believing SEARCH here
+      // deletes the entire mirror for a mailbox that is perfectly intact.
+      client.search.mockResolvedValue([]);
+      client.mailbox.exists = 3;
+      client.fetch.mockImplementation(messagesFrom());
+      await engine.syncMailbox('work', 'INBOX');
+
+      expect(store.countMessages('work', 'INBOX')).toBe(3);
+    });
+
+    it('still removes messages when SEARCH and SELECT agree', async () => {
+      engine = build();
+      await seedThree();
+
+      // Genuine deletion: both the search result and the message count drop.
+      client.search.mockResolvedValue([1, 3]);
+      client.mailbox.exists = 2;
+      client.fetch.mockImplementation(messagesFrom());
+      await engine.syncMailbox('work', 'INBOX');
+
+      expect(store.countMessages('work', 'INBOX')).toBe(2);
+      expect(store.getMessage('work', 'INBOX', 2, '100')).toBeUndefined();
+    });
+
+    it('accepts a genuinely emptied mailbox', async () => {
+      engine = build();
+      await seedThree();
+
+      client.search.mockResolvedValue([]);
+      client.mailbox.exists = 0;
+      client.fetch.mockImplementation(messagesFrom());
+      await engine.syncMailbox('work', 'INBOX');
+
+      expect(store.countMessages('work', 'INBOX')).toBe(0);
+    });
+  });
 
   describe('resilience', () => {
     it('leaves existing rows in place when a sync fails', async () => {

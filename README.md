@@ -875,6 +875,23 @@ pnpm build       # build
 pnpm start       # run
 ```
 
+### Testing
+
+```bash
+pnpm test              # unit tests
+pnpm test:integration  # against a throwaway GreenMail server (Docker required)
+pnpm smoke             # every MCP tool against a real configured account
+```
+
+`pnpm smoke` drives all tools over stdio the way a client does, which reaches
+what GreenMail cannot: provider quirks, real-world MIME, and the macOS
+Calendar bridges. It needs a working account, so it is not part of CI. Writes
+stay inside a scratch folder and a draft it creates itself; it does not touch
+Calendar, Reminders, notifications, or `reply_email`, which would send mail to
+a real correspondent. Pass `E2E_ACCOUNT=<name>` to choose an account, otherwise
+it uses the first one configured.
+
+
 ## License
 
 [LGPL-3.0-or-later](LICENSE)

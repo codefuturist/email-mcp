@@ -22,6 +22,10 @@ function createMockImapClient() {
     messageDelete: vi.fn().mockResolvedValue(true),
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
+    mailboxCreate: vi.fn().mockResolvedValue({ path: 'X' }),
+    mailboxRename: vi.fn().mockResolvedValue({ path: 'X' }),
+    mailboxDelete: vi.fn().mockResolvedValue({ path: 'X' }),
+    append: vi.fn().mockResolvedValue({ uid: 1 }),
     _releaseFn: releaseFn,
   };
 }
@@ -513,6 +517,116 @@ describe('ImapService', () => {
       expect(parts).toHaveLength(1);
       expect(parts[0]).toContain('BEGIN:VCALENDAR');
       expect(parts[0]).not.toMatch(/^QkVHSU4/); // base64 of "BEGIN"
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getThread
+  // -----------------------------------------------------------------------
+
+  describe('getThread', () => {
+    it('drains the message fetch before downloading any body part', async () => {
+      let outerDrained = false;
+
+      client.search.mockResolvedValue([11]);
+      client.fetchOne.mockResolvedValue({
+        uid: 11,
+        envelope: { subject: 'Root', messageId: '<root@x>' },
+        flags: [],
+        bodyStructure: { type: 'text/plain', size: 20 },
+        headers: Buffer.from('Subject: Root\r\nMessage-ID: <root@x>\r\n\r\n', 'utf-8'),
+      });
+      client.fetch.mockImplementation(() =>
+        (async function* gen() {
+          try {
+            yield {
+              uid: 11,
+              envelope: { subject: 'Root', messageId: '<root@x>' },
+              flags: [],
+              bodyStructure: { type: 'text/plain', size: 20 },
+              headers: Buffer.from('Subject: Root\r\n\r\n', 'utf-8'),
+            };
+          } finally {
+            outerDrained = true;
+          }
+        })(),
+      );
+      // Record rather than assert inside the mock: messageToEmail wraps the
+      // download in a try/catch, which would swallow a failed expectation and
+      // let this test pass while the deadlock remained.
+      let drainedAtDownload: boolean | undefined;
+      client.download.mockImplementation(async () => {
+        drainedAtDownload ??= outerDrained;
+        return downloadYielding('body');
+      });
+
+      await service.getThread('test', '<root@x>', 'INBOX');
+
+      expect(client.download).toHaveBeenCalled();
+      // ImapFlow runs one command at a time. Downloading a body part while the
+      // message fetch is still streaming deadlocks the connection — against a
+      // real server this hangs until the client gives up.
+      expect(drainedAtDownload).toBe(true);
+    });
+
+    it('does not transfer whole messages to build a thread', async () => {
+      client.search.mockResolvedValue([11]);
+      client.fetch.mockImplementation(() =>
+        (async function* gen() {
+          yield {
+            uid: 11,
+            envelope: { subject: 'Root', messageId: '<root@x>' },
+            flags: [],
+            bodyStructure: { type: 'text/plain', size: 20 },
+            headers: Buffer.from('Subject: Root\r\n\r\n', 'utf-8'),
+          };
+        })(),
+      );
+      client.download.mockResolvedValue(downloadYielding('body'));
+
+      await service.getThread('test', '<root@x>', 'INBOX');
+
+      // A thread caps at 50 messages; pulling full sources means up to 50
+      // complete messages, attachments included, for a summary view.
+      const bodyFetch = client.fetch.mock.calls.at(-1);
+      expect(bodyFetch?.[1]?.source).toBeUndefined();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Server error reporting
+  // -----------------------------------------------------------------------
+
+  describe('IMAP server rejections', () => {
+    /** ImapFlow throws Error('Command failed') and puts the detail on .response. */
+    function serverRejection(response: string): Error & { response: string } {
+      return Object.assign(new Error('Command failed'), { response });
+    }
+
+    it('surfaces the reason the server gave for refusing a mailbox', async () => {
+      client.mailboxCreate = vi
+        .fn()
+        .mockRejectedValue(
+          serverRejection('6 NO invalid mailbox name ["X"]: operation not allowed'),
+        );
+
+      // "Command failed" alone tells the caller nothing actionable; the server
+      // explained exactly what was wrong and that explanation must survive.
+      await expect(service.createMailbox('test', 'X')).rejects.toThrow(/invalid mailbox name/i);
+    });
+
+    it('surfaces rejection reasons for rename and delete too', async () => {
+      client.mailboxRename = vi.fn().mockRejectedValue(serverRejection('7 NO cannot rename'));
+      client.mailboxDelete = vi.fn().mockRejectedValue(serverRejection('8 NO cannot delete'));
+
+      await expect(service.renameMailbox('test', 'a', 'b')).rejects.toThrow(/cannot rename/);
+      await expect(service.deleteMailbox('test', 'a')).rejects.toThrow(/cannot delete/);
+    });
+
+    it('leaves an error that carries no server response untouched', async () => {
+      client.mailboxCreate = vi.fn().mockRejectedValue(new Error('ECONNRESET'));
+
+      await expect(service.createMailbox('test', 'X')).rejects.toThrow('ECONNRESET');
     });
   });
 
