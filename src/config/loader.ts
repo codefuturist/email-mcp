@@ -46,6 +46,19 @@ function loadFromEnv(): RawAppConfig | null {
     settings: {
       rate_limit: parseInt(process.env.MCP_EMAIL_RATE_LIMIT ?? '10', 10),
       read_only: process.env.MCP_EMAIL_READ_ONLY === 'true',
+      cache: {
+        // Opt-out rather than opt-in: the mirror is a pure win for reads and
+        // degrades to live behaviour if anything goes wrong.
+        enabled: process.env.MCP_EMAIL_CACHE_ENABLED !== 'false',
+        mailboxes: (process.env.MCP_EMAIL_CACHE_MAILBOXES ?? 'INBOX')
+          .split(',')
+          .map((m) => m.trim())
+          .filter(Boolean),
+        window_days: parseInt(process.env.MCP_EMAIL_CACHE_WINDOW_DAYS ?? '90', 10),
+        body_messages: parseInt(process.env.MCP_EMAIL_CACHE_BODY_MESSAGES ?? '500', 10),
+        max_size_mb: parseInt(process.env.MCP_EMAIL_CACHE_MAX_SIZE_MB ?? '500', 10),
+        sync_interval: parseInt(process.env.MCP_EMAIL_CACHE_SYNC_INTERVAL ?? '300', 10),
+      },
       watcher: {
         enabled: process.env.MCP_EMAIL_WATCHER_ENABLED === 'true',
         folders: (process.env.MCP_EMAIL_WATCHER_FOLDERS ?? 'INBOX')
@@ -210,6 +223,14 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
     settings: {
       rateLimit: raw.settings.rate_limit,
       readOnly: raw.settings.read_only,
+      cache: {
+        enabled: raw.settings.cache.enabled,
+        mailboxes: raw.settings.cache.mailboxes,
+        windowDays: raw.settings.cache.window_days,
+        bodyMessages: raw.settings.cache.body_messages,
+        maxSizeMb: raw.settings.cache.max_size_mb,
+        syncInterval: raw.settings.cache.sync_interval,
+      },
       watcher: {
         enabled: raw.settings.watcher.enabled,
         folders: raw.settings.watcher.folders,
@@ -309,6 +330,17 @@ export function generateTemplate(): string {
 [settings]
 rate_limit = 10  # max emails per minute per account
 read_only = false  # set to true to disable all write operations
+
+# Local mirror — keeps a SQLite copy of mail under $XDG_CACHE_HOME/email-mcp
+# so reads are fast and still work while briefly offline. On by default; the
+# mirror is regenerable, so deleting it is always safe.
+# [settings.cache]
+# enabled = true          # set false to always read live from IMAP
+# mailboxes = ["INBOX"]   # synced in the background; others cache on read
+# window_days = 90        # how far back to mirror (0 = no limit)
+# body_messages = 500     # newest N messages to prefetch bodies for
+# max_size_mb = 500       # backstop on mirror size
+# sync_interval = 300     # seconds between background reconciles
 
 # [settings.watcher]
 # enabled = false        # enable IMAP IDLE real-time monitoring

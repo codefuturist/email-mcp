@@ -41,6 +41,14 @@ function createConfig(readOnly: boolean): AppConfig {
     settings: {
       rateLimit: 10,
       readOnly,
+      cache: {
+        enabled: true,
+        mailboxes: ['INBOX'],
+        windowDays: 90,
+        bodyMessages: 500,
+        maxSizeMb: 500,
+        syncInterval: 300,
+      },
       watcher: { enabled: false, folders: ['INBOX'], idleTimeout: 1740 },
       hooks: {
         onNewEmail: 'notify',

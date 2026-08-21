@@ -25,6 +25,9 @@ export const xdg = {
     process.env.XDG_STATE_HOME ?? path.join(os.homedir(), '.local', 'state'),
     APP_NAME,
   ),
+
+  /** Cache directory: ~/.cache/email-mcp/ */
+  cache: path.join(process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), '.cache'), APP_NAME),
 } as const;
 
 /** Full path to the config file */
@@ -44,3 +47,20 @@ export const CALENDAR_ATTACHMENTS_DIR = path.join(xdg.data, 'calendar-attachment
 
 /** JSON state file tracking which emails have been auto-processed for calendar/reminders */
 export const CALENDAR_STATE_FILE = path.join(xdg.state, 'calendar-processed.json');
+
+/**
+ * Local mirror of server-side mail (envelopes, flags, bodies, search index).
+ *
+ * Lives under the cache directory because it is entirely regenerable — every
+ * row can be re-fetched from IMAP. Deleting it costs time, never data.
+ */
+export const CACHE_DB = path.join(xdg.cache, 'cache.db');
+
+/**
+ * Queued local writes awaiting replay against the server.
+ *
+ * Lives under the *state* directory, not the cache: it holds user intent that
+ * exists nowhere else until it has been flushed. Deleting it loses data, so
+ * `cache clear` must never touch it.
+ */
+export const OUTBOX_DB = path.join(xdg.state, 'outbox.db');

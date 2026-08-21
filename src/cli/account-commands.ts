@@ -499,6 +499,14 @@ async function addAccount(): Promise<void> {
         settings: {
           rate_limit: 10,
           read_only: false,
+          cache: {
+            enabled: true,
+            mailboxes: ['INBOX'],
+            window_days: 90,
+            body_messages: 500,
+            max_size_mb: 500,
+            sync_interval: 300,
+          },
           watcher: {
             enabled: false,
             folders: ['INBOX'],

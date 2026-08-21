@@ -115,9 +115,38 @@ export const HooksConfigSchema = z.object({
   calendar_confirm: z.boolean().default(true),
 });
 
+/**
+ * Local mirror settings.
+ *
+ * Defaults are deliberately conservative: mirroring INBOX only, 90 days back.
+ * Measured against a real 170-message mailbox this costs well under a
+ * megabyte, so `max_size_mb` is a backstop rather than an expected limit.
+ */
+export const CacheConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** Mailboxes synced proactively. Others are still cached when read. */
+  mailboxes: z.array(z.string()).default(['INBOX']),
+  /** How far back to mirror. 0 means no limit. */
+  window_days: z.number().int().min(0).default(90),
+  /** Newest N messages to prefetch bodies for; the rest cache on read. */
+  body_messages: z.number().int().min(0).default(500),
+  /** Backstop on mirror size. */
+  max_size_mb: z.number().int().min(1).default(500),
+  /** Seconds between background reconciles. */
+  sync_interval: z.number().int().min(30).default(300),
+});
+
 export const SettingsSchema = z.object({
   rate_limit: z.number().int().min(1).default(10),
   read_only: z.boolean().default(false),
+  cache: CacheConfigSchema.default({
+    enabled: true,
+    mailboxes: ['INBOX'],
+    window_days: 90,
+    body_messages: 500,
+    max_size_mb: 500,
+    sync_interval: 300,
+  }),
   watcher: WatcherConfigSchema.default({
     enabled: false,
     folders: ['INBOX'],
@@ -148,6 +177,14 @@ export const AppConfigFileSchema = z.object({
   settings: SettingsSchema.default({
     rate_limit: 10,
     read_only: false,
+    cache: {
+      enabled: true,
+      mailboxes: ['INBOX'],
+      window_days: 90,
+      body_messages: 500,
+      max_size_mb: 500,
+      sync_interval: 300,
+    },
     watcher: {
       enabled: false,
       folders: ['INBOX'],
