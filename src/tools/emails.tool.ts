@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import type ImapService from '../services/imap.service.js';
 import type { Email, EmailMeta } from '../types/index.js';
+import { stripHtml } from '../utils/html.js';
 import { emailListOutputSchema, emailStatusOutputSchema } from './schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -33,26 +34,6 @@ function formatEmailMeta(email: EmailMeta): string {
   const labelStr = email.labels.length > 0 ? `\n  🏷️ ${email.labels.join(', ')}` : '';
 
   return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${email.preview ? `\n  ${email.preview}` : ''}`;
-}
-
-/** Strips HTML markup and decodes common entities to produce readable plain text. */
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<li\b[^>]*>/gi, '\n• ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 /** Removes quoted reply chains and signatures from plain text. */

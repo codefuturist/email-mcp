@@ -257,6 +257,101 @@ describe('ImapService', () => {
       expect(email.bodyHtml).toContain('Ihre Sendung ist unterwegs.');
     });
 
+    it('downloads the body of a single-part message rather than reading raw source', async () => {
+      // 165 of 169 messages in a real mailbox look like this: no multipart, no
+      // `part` field. Reading the body out of `source` returns it still
+      // transfer-encoded — "=3D" for '=', soft breaks splitting words — because
+      // source is raw RFC822. download() applies the decoding.
+      client.fetchOne.mockResolvedValue({
+        uid: 42,
+        envelope: { subject: 'Newsletter', messageId: '<a@b>' },
+        flags: [],
+        bodyStructure: { type: 'text/html', encoding: 'quoted-printable', size: 5136 },
+        headers: Buffer.from(
+          'Subject: Newsletter\r\nContent-Type: text/html; charset=utf-8\r\n' +
+            'Content-Transfer-Encoding: quoted-printable\r\n\r\n',
+          'utf-8',
+        ),
+      });
+      client.download.mockResolvedValue(downloadYielding('<html lang="en">We’re here</html>'));
+
+      const email = await service.getEmail('test', '42', 'INBOX');
+
+      expect(client.download).toHaveBeenCalledWith('42', '1', { uid: true });
+      expect(email.bodyHtml).toContain('lang="en"');
+      expect(email.bodyHtml ?? '').not.toContain('=3D');
+    });
+
+    it('parses headers without downloading the whole message', async () => {
+      client.fetchOne.mockResolvedValue({
+        uid: 42,
+        envelope: { subject: 'Newsletter', messageId: '<a@b>' },
+        flags: [],
+        bodyStructure: { type: 'text/plain', size: 20 },
+        headers: Buffer.from(
+          'Subject: Newsletter\r\nReferences: <x@y> <z@w>\r\nContent-Type: text/plain\r\n\r\n',
+          'utf-8',
+        ),
+      });
+      client.download.mockResolvedValue(downloadYielding('body text'));
+
+      const email = await service.getEmail('test', '42', 'INBOX');
+
+      expect(email.headers.subject).toBe('Newsletter');
+      expect(email.references).toEqual(['<x@y>', '<z@w>']);
+
+      // `source: true` pulls the entire message — base64 attachments included —
+      // just to read headers that HEADER alone would supply.
+      const [, query] = client.fetchOne.mock.calls[0];
+      expect(query.source).toBeUndefined();
+      expect(query.headers).toBe(true);
+    });
+
+    it('prefers the html part when the plain part is a stub', async () => {
+      client.fetchOne.mockResolvedValue({
+        uid: 42,
+        envelope: { subject: 'Stub', messageId: '<a@b>' },
+        flags: [],
+        bodyStructure: {
+          type: 'multipart/alternative',
+          childNodes: [
+            // "This message requires HTML" — a placeholder, not the content.
+            { part: '1', type: 'text/plain', size: 48 },
+            { part: '2', type: 'text/html', size: 9000 },
+          ],
+        },
+        headers: Buffer.from('Subject: Stub\r\n\r\n', 'utf-8'),
+      });
+      client.download.mockResolvedValue(downloadYielding('<html>real content</html>'));
+
+      await service.getEmail('test', '42', 'INBOX');
+
+      expect(client.download).toHaveBeenCalledWith('42', '2', { uid: true });
+    });
+
+    it('keeps the plain part when it is substantive', async () => {
+      client.fetchOne.mockResolvedValue({
+        uid: 42,
+        envelope: { subject: 'Real', messageId: '<a@b>' },
+        flags: [],
+        bodyStructure: {
+          type: 'multipart/alternative',
+          childNodes: [
+            { part: '1', type: 'text/plain', size: 4000 },
+            { part: '2', type: 'text/html', size: 9000 },
+          ],
+        },
+        headers: Buffer.from('Subject: Real\r\n\r\n', 'utf-8'),
+      });
+      client.download.mockResolvedValue(downloadYielding('the plain body'));
+
+      await service.getEmail('test', '42', 'INBOX');
+
+      // Plain text is far cheaper in context-window terms, which the
+      // performance roadmap calls the real constraint.
+      expect(client.download).toHaveBeenCalledWith('42', '1', { uid: true });
+    });
+
     it('reports a well-formed attachment mimeType', async () => {
       client.download.mockResolvedValue(downloadYielding('body'));
 
@@ -267,23 +362,42 @@ describe('ImapService', () => {
       expect(email.attachments[0].mimeType).toBe('application/pdf');
     });
 
-    it('does not issue a part download when there is no separate text part', async () => {
+    it('returns an empty body rather than throwing when the part is missing', async () => {
       client.fetchOne.mockResolvedValue({
         uid: 42,
         envelope: { subject: 'Simple', messageId: '<a@b>' },
         flags: [],
         bodyStructure: { type: 'text/plain', size: 20 },
-        source: Buffer.from(
-          'Subject: Simple\r\nContent-Type: text/plain\r\n\r\njust the body\r\n',
-          'utf-8',
-        ),
+        headers: Buffer.from('Subject: Simple\r\nContent-Type: text/plain\r\n\r\n', 'utf-8'),
       });
+      client.download.mockRejectedValue(new Error('NO such part'));
 
       const email = await service.getEmail('test', '42', 'INBOX');
 
-      // The full source was already fetched — a second round trip is waste.
-      expect(client.download).not.toHaveBeenCalled();
-      expect(email.bodyText?.trim()).toBe('just the body');
+      // Headers and metadata are still useful even when the server refuses
+      // the body part, so this degrades rather than failing the whole call.
+      expect(email.subject).toBe('Simple');
+      expect(email.bodyText).toBeUndefined();
+    });
+
+    it('unfolds headers split across continuation lines', async () => {
+      client.fetchOne.mockResolvedValue({
+        uid: 42,
+        envelope: { subject: 'Folded', messageId: '<a@b>' },
+        flags: [],
+        bodyStructure: { type: 'text/plain', size: 20 },
+        // RFC 5322 allows long headers to wrap onto indented lines; treating
+        // the continuation as a new header loses half the value.
+        headers: Buffer.from(
+          'Subject: Folded\r\nReferences: <one@x>\r\n <two@x>\r\n\t<three@x>\r\n\r\n',
+          'utf-8',
+        ),
+      });
+      client.download.mockResolvedValue(downloadYielding('body'));
+
+      const email = await service.getEmail('test', '42', 'INBOX');
+
+      expect(email.references).toEqual(['<one@x>', '<two@x>', '<three@x>']);
     });
   });
 

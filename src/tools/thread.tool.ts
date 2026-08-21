@@ -9,29 +9,11 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type ImapService from '../services/imap.service.js';
+import { stripHtml } from '../utils/html.js';
 
 // ---------------------------------------------------------------------------
-// Inline body helpers (avoids cross-tool import)
+// Body helpers
 // ---------------------------------------------------------------------------
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<li\b[^>]*>/gi, '\n• ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
 
 function stripReplyChain(text: string): string {
   const lines = text.split('\n');

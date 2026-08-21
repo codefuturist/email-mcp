@@ -209,9 +209,13 @@ function collectTextParts(bodyStructure: unknown, partPath = ''): TextPart[] {
 
   // Leaf node. Attachments are never body content, even when text/*.
   const { type, subtype } = splitMimeType(bs.type);
-  if (type === 'text' && bs.disposition !== 'attachment' && effectivePath) {
+  if (type === 'text' && bs.disposition !== 'attachment') {
     found.push({
-      path: effectivePath,
+      // A single-part message has no `part` field at all — the body is
+      // addressable as part "1", which is what the vast majority of real mail
+      // looks like. Without this the caller falls back to raw `source`, which
+      // is still transfer-encoded.
+      path: effectivePath || '1',
       subtype,
       size: typeof bs.size === 'number' ? bs.size : 0,
     });
@@ -226,16 +230,56 @@ function collectTextParts(bodyStructure: unknown, partPath = ''): TextPart[] {
  *
  * `parts` is in document order and excludes attachments.
  *
- * Current policy: prefer `text/plain`, else the first text part. Plain text is
- * cheaper in agent context-window terms, which `docs/performance-roadmap.md`
- * identifies as the real constraint.
+ * Prefers `text/plain`: it is far cheaper in agent context-window terms, which
+ * `docs/performance-roadmap.md` identifies as the real constraint.
  *
- * Known refinement, not yet implemented: some senders ship a near-empty plain
- * part alongside the real content in HTML, where size-aware selection would
- * pick better.
+ * The exception is the stub plain part — a few dozen bytes of "This message
+ * requires an HTML-capable reader" shipped next to the real content in HTML.
+ * Taking it literally makes the model report the placeholder as the email, so
+ * an implausibly small plain part loses to a much larger HTML sibling.
  */
+const STUB_PLAIN_MAX_BYTES = 200;
+const STUB_PLAIN_RATIO = 5;
+
 function selectBodyPart(parts: TextPart[]): TextPart | undefined {
-  return parts.find((p) => p.subtype === 'plain') ?? parts[0];
+  const plain = parts.find((p) => p.subtype === 'plain');
+  const html = parts.find((p) => p.subtype === 'html');
+
+  if (!plain) return html ?? parts[0];
+  if (html && plain.size < STUB_PLAIN_MAX_BYTES && html.size > plain.size * STUB_PLAIN_RATIO) {
+    return html;
+  }
+  return plain;
+}
+
+/**
+ * Parse an RFC 5322 header block into a lowercase-keyed map.
+ *
+ * Continuation lines (leading space or tab) are unfolded onto the preceding
+ * header, so a long References or Subject split across lines survives intact.
+ */
+function parseHeaders(raw: unknown): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!Buffer.isBuffer(raw)) return headers;
+
+  const text = raw.toString('utf-8');
+  const headerEnd = text.indexOf('\r\n\r\n');
+  const section = headerEnd >= 0 ? text.slice(0, headerEnd) : text;
+
+  let currentKey: string | undefined;
+  section.split(/\r?\n/).forEach((line) => {
+    if (/^[ \t]/.test(line)) {
+      if (currentKey) headers[currentKey] += ` ${line.trim()}`;
+      return;
+    }
+    const colonIdx = line.indexOf(':');
+    if (colonIdx > 0) {
+      currentKey = line.slice(0, colonIdx).trim().toLowerCase();
+      headers[currentKey] = line.slice(colonIdx + 1).trim();
+    }
+  });
+
+  return headers;
 }
 
 async function messageToEmail(
@@ -246,50 +290,19 @@ async function messageToEmail(
   const meta = messageToEmailMeta(msg);
   const envelope = (msg.envelope ?? {}) as Record<string, unknown>;
 
-  // Parse full source for body content
   let bodyText: string | undefined;
   let bodyHtml: string | undefined;
-  const headers: Record<string, string> = {};
 
-  if (msg.source && Buffer.isBuffer(msg.source)) {
-    const raw = msg.source.toString('utf-8');
-    const headerEnd = raw.indexOf('\r\n\r\n');
-    if (headerEnd >= 0) {
-      // Parse headers
-      const headerSection = raw.slice(0, headerEnd);
-      headerSection.split('\r\n').forEach((line) => {
-        const colonIdx = line.indexOf(':');
-        if (colonIdx > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
-          const key = line.slice(0, colonIdx).trim().toLowerCase();
-          const value = line.slice(colonIdx + 1).trim();
-          headers[key] = value;
-        }
-      });
+  // Headers come from a HEADER fetch. `source` would work too, but it pulls
+  // the entire message — base64 attachments and all — to read a few hundred
+  // bytes of header.
+  const headers = parseHeaders(msg.headers);
 
-      const body = raw.slice(headerEnd + 4);
-      // Simple content type detection
-      const contentType = headers['content-type'] ?? '';
-      // For a multipart message everything after the headers is boundary
-      // markers and per-part headers, not content. Treating it as a body
-      // surfaces raw MIME to the caller — and because the tool layer prefers
-      // bodyText over stripping bodyHtml, it hides the real content entirely.
-      // The individual part is downloaded below instead.
-      if (contentType.startsWith('multipart/')) {
-        // Leave both undefined; the part download decides.
-      } else if (contentType.includes('text/html')) {
-        bodyHtml = body;
-      } else {
-        bodyText = body;
-      }
-    }
-  }
-
-  // `source` above yields the raw message, which for a multipart mail is MIME
-  // envelope noise rather than a readable body. Fetch the specific text part
-  // instead — but only when there is a distinct one to fetch, since a
-  // single-part message was already fully parsed above.
-  const textParts = collectTextParts(msg.bodyStructure);
-  const chosen = textParts.length > 0 ? selectBodyPart(textParts) : undefined;
+  // Always download the body part; never read it out of `source`. Raw source
+  // is transfer-encoded (quoted-printable, base64) with soft line breaks, so
+  // using it directly yields "=3D" for '=' and words split mid-token.
+  // download() applies the decoding declared by Content-Transfer-Encoding.
+  const chosen = selectBodyPart(collectTextParts(msg.bodyStructure));
 
   if (chosen) {
     try {
@@ -308,7 +321,7 @@ async function messageToEmail(
         }
       }
     } catch {
-      // Part may not exist — keep whatever `source` parsing produced.
+      // Part may not exist on this server — better an empty body than a throw.
     }
   }
 
@@ -573,7 +586,10 @@ export default class ImapService {
           envelope: true,
           flags: true,
           bodyStructure: true,
-          source: true,
+          // Headers only. `source: true` would transfer the whole message,
+          // attachments included, to read a few hundred bytes of header —
+          // the body arrives separately as a decoded MIME part.
+          headers: true,
         },
         { uid: true },
       );
