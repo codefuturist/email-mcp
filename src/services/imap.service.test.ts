@@ -18,11 +18,15 @@ function createMockImapClient() {
     messageDelete: vi.fn().mockResolvedValue(true),
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
+    append: vi.fn().mockResolvedValue({ uid: 42 }),
     _releaseFn: releaseFn,
   };
 }
 
-function createMockConnectionManager(mockClient: ReturnType<typeof createMockImapClient>) {
+function createMockConnectionManager(
+  mockClient: ReturnType<typeof createMockImapClient>,
+  accountOverrides: Record<string, unknown> = {},
+) {
   return {
     getAccount: vi.fn().mockReturnValue({
       name: 'test',
@@ -30,6 +34,7 @@ function createMockConnectionManager(mockClient: ReturnType<typeof createMockIma
       username: 'test@example.com',
       imap: { host: 'imap.example.com', port: 993, tls: true, starttls: false, verifySsl: true },
       smtp: { host: 'smtp.example.com', port: 465, tls: true, starttls: false, verifySsl: true },
+      ...accountOverrides,
     }),
     getAccountNames: vi.fn().mockReturnValue(['test']),
     getImapClient: vi.fn().mockResolvedValue(mockClient),
@@ -163,6 +168,67 @@ describe('ImapService', () => {
       await service.setFlags('test', '10', 'INBOX', 'flag');
 
       expect(client.messageFlagsAdd).toHaveBeenCalledWith('10', ['\\Flagged'], { uid: true });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // resolveSentMailbox / appendToSent
+  // -----------------------------------------------------------------------
+
+  describe('resolveSentMailbox', () => {
+    it('picks the folder advertising the \\Sent special-use attribute', async () => {
+      client.list.mockResolvedValue([
+        { name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' },
+        { name: 'Sent Messages', path: 'INBOX.Sent Messages' },
+        { name: 'Sent', path: 'INBOX.Sent', specialUse: '\\Sent' },
+      ]);
+
+      const mailbox = await service.resolveSentMailbox('test');
+
+      expect(mailbox).toBe('INBOX.Sent');
+    });
+
+    it('falls back to the account-configured sentMailbox when special-use is not advertised', async () => {
+      connections = createMockConnectionManager(client, { sentMailbox: 'INBOX.Sent' });
+      service = new ImapService(connections);
+      client.list.mockResolvedValue([
+        { name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' },
+        { name: 'Sent Messages', path: 'INBOX.Sent Messages' },
+        { name: 'Sent', path: 'INBOX.Sent' },
+      ]);
+
+      const mailbox = await service.resolveSentMailbox('test');
+
+      expect(mailbox).toBe('INBOX.Sent');
+    });
+
+    it('falls back to "Sent" when neither special-use nor config is available', async () => {
+      client.list.mockResolvedValue([{ name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' }]);
+
+      const mailbox = await service.resolveSentMailbox('test');
+
+      expect(mailbox).toBe('Sent');
+    });
+  });
+
+  describe('appendToSent', () => {
+    it('appends the raw message to the resolved Sent mailbox, marked \\Seen', async () => {
+      client.list.mockResolvedValue([{ name: 'Sent', path: 'INBOX.Sent', specialUse: '\\Sent' }]);
+      const raw = Buffer.from('From: test@example.com\r\n\r\nHello');
+
+      const result = await service.appendToSent('test', raw);
+
+      expect(client.append).toHaveBeenCalledWith('INBOX.Sent', raw, ['\\Seen']);
+      expect(result).toEqual({ mailbox: 'INBOX.Sent', uid: 42 });
+    });
+
+    it('propagates append failures to the caller', async () => {
+      client.list.mockResolvedValue([]);
+      client.append.mockRejectedValue(new Error('mailbox does not exist'));
+
+      await expect(service.appendToSent('test', Buffer.from('x'))).rejects.toThrow(
+        'mailbox does not exist',
+      );
     });
   });
 });

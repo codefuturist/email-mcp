@@ -68,6 +68,11 @@ export interface AccountConfig {
   oauth2?: OAuth2Config;
   imap: ImapConfig;
   smtp: SmtpConfig;
+  /**
+   * Fallback Sent mailbox path, used only when the server doesn't advertise
+   * a folder with the \Sent special-use attribute. E.g. "INBOX.Sent".
+   */
+  sentMailbox?: string;
 }
 
 export interface WatcherConfig {
@@ -202,6 +207,16 @@ export interface Email extends EmailMeta {
 export interface SendResult {
   messageId: string;
   status: 'sent' | 'failed';
+  /**
+   * Outcome of copying the sent message into the account's Sent mailbox.
+   * A failure here does not fail the overall send — the mail already went
+   * out over SMTP — it's surfaced here as a warning instead.
+   */
+  sentCopy?: {
+    saved: boolean;
+    mailbox?: string;
+    warning?: string;
+  };
 }
 
 export interface PaginatedResult<T> {

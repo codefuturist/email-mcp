@@ -8,6 +8,7 @@ import audit from '../safety/audit.js';
 import { validateInputLength } from '../safety/validation.js';
 
 import type SmtpService from '../services/smtp.service.js';
+import formatSentCopyNote from './format-send-result.js';
 
 export default function registerSendTools(server: McpServer, smtpService: SmtpService): void {
   // ---------------------------------------------------------------------------
@@ -41,7 +42,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email sent successfully!\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}\nMessage-ID: ${result.messageId}`,
+              text: `✅ Email sent successfully!\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}\nMessage-ID: ${result.messageId}${formatSentCopyNote(result)}`,
             },
           ],
         };
@@ -95,7 +96,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
           content: [
             {
               type: 'text' as const,
-              text: `✅ Reply sent successfully!\nMessage-ID: ${result.messageId}`,
+              text: `✅ Reply sent successfully!\nMessage-ID: ${result.messageId}${formatSentCopyNote(result)}`,
             },
           ],
         };
@@ -149,7 +150,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email forwarded successfully!\nTo: ${params.to.join(', ')}\nMessage-ID: ${result.messageId}`,
+              text: `✅ Email forwarded successfully!\nTo: ${params.to.join(', ')}\nMessage-ID: ${result.messageId}${formatSentCopyNote(result)}`,
             },
           ],
         };

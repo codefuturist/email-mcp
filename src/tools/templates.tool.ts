@@ -11,6 +11,7 @@ import audit from '../safety/audit.js';
 import type ImapService from '../services/imap.service.js';
 import type SmtpService from '../services/smtp.service.js';
 import type TemplateService from '../services/template.service.js';
+import formatSentCopyNote from './format-send-result.js';
 
 export function registerTemplateReadTools(
   server: McpServer,
@@ -166,7 +167,7 @@ export function registerTemplateWriteTools(
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email sent from template "${template}" (Message-ID: ${sendResult.messageId})`,
+              text: `✅ Email sent from template "${template}" (Message-ID: ${sendResult.messageId})${formatSentCopyNote(sendResult)}`,
             },
           ],
         };
