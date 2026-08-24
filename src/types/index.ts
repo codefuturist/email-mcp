@@ -196,6 +196,21 @@ export interface Email extends EmailMeta {
 }
 
 // ---------------------------------------------------------------------------
+// Outgoing attachments
+// ---------------------------------------------------------------------------
+
+/**
+ * A file to attach to an outgoing email (send, reply, forward, or draft).
+ * Provide exactly one of `content` (base64) or `path` (local file path).
+ */
+export interface AttachmentInput {
+  filename: string;
+  content?: string;
+  path?: string;
+  contentType?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
 

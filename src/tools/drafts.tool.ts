@@ -8,6 +8,7 @@ import audit from '../safety/audit.js';
 
 import type ImapService from '../services/imap.service.js';
 import type SmtpService from '../services/smtp.service.js';
+import attachmentsSchema from './attachment-input.schema.js';
 
 export default function registerDraftTools(
   server: McpServer,
@@ -32,9 +33,10 @@ export default function registerDraftTools(
       bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
       html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
       in_reply_to: z.string().optional().describe('Message-ID for threading (from get_email)'),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false },
-    async ({ account, to, subject, body, cc, bcc, html, in_reply_to: inReplyTo }) => {
+    async ({ account, to, subject, body, cc, bcc, html, in_reply_to: inReplyTo, attachments }) => {
       try {
         const result = await imapService.saveDraft(account, {
           to,
@@ -44,6 +46,7 @@ export default function registerDraftTools(
           bcc,
           html,
           inReplyTo,
+          attachments,
         });
 
         await audit.log('save_draft', account, { to, subject }, 'ok');
@@ -77,7 +80,7 @@ export default function registerDraftTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'send_draft',
-    'Send an existing draft email and remove it from Drafts. The draft is fetched, sent via SMTP, then deleted. Use list_emails with the Drafts mailbox to find draft IDs.',
+    'Send an existing draft email and remove it from Drafts. The draft (including any attachments saved with it) is fetched, sent via SMTP, then deleted. Use list_emails with the Drafts mailbox to find draft IDs.',
     {
       account: z.string().describe('Account name from list_accounts'),
       id: z.number().int().describe('Draft email UID (from list_emails on Drafts mailbox)'),

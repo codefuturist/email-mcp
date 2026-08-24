@@ -2,6 +2,7 @@ import {
   sanitizeMailboxName,
   sanitizeSearchQuery,
   sanitizeTemplateVariable,
+  validateAttachments,
   validateInputLength,
   validateLabelName,
   validateWebhookUrl,
@@ -155,6 +156,72 @@ describe('validateLabelName', () => {
 
   it('trims whitespace and returns valid name', () => {
     expect(validateLabelName('  Important  ')).toBe('Important');
+  });
+});
+
+describe('validateAttachments', () => {
+  it('allows undefined and empty arrays', () => {
+    expect(() => validateAttachments(undefined)).not.toThrow();
+    expect(() => validateAttachments([])).not.toThrow();
+  });
+
+  it('allows a valid base64 attachment', () => {
+    expect(() =>
+      validateAttachments([
+        { filename: 'a.txt', content: Buffer.from('hello').toString('base64') },
+      ]),
+    ).not.toThrow();
+  });
+
+  it('allows a valid path-based attachment', () => {
+    expect(() => validateAttachments([{ filename: 'a.txt', path: '/tmp/a.txt' }])).not.toThrow();
+  });
+
+  it('throws when more than the max number of attachments are given', () => {
+    const attachments = Array.from({ length: 11 }, (_, i) => ({
+      filename: `f${i}.txt`,
+      content: 'aGVsbG8=',
+    }));
+    expect(() => validateAttachments(attachments)).toThrow('Too many attachments');
+  });
+
+  it('throws on empty filename', () => {
+    expect(() => validateAttachments([{ filename: '', content: 'aGVsbG8=' }])).toThrow(
+      'non-empty filename',
+    );
+  });
+
+  it('throws on filename with a path separator', () => {
+    expect(() => validateAttachments([{ filename: '../evil.txt', content: 'aGVsbG8=' }])).toThrow(
+      'path separators',
+    );
+  });
+
+  it('throws when neither content nor path is provided', () => {
+    expect(() => validateAttachments([{ filename: 'a.txt' }])).toThrow('exactly one of "content"');
+  });
+
+  it('throws when both content and path are provided', () => {
+    expect(() =>
+      validateAttachments([{ filename: 'a.txt', content: 'aGVsbG8=', path: '/tmp/a.txt' }]),
+    ).toThrow('exactly one of "content"');
+  });
+
+  it('throws when a single attachment exceeds the per-file limit', () => {
+    const oversized = Buffer.alloc(26 * 1024 * 1024).toString('base64');
+    expect(() => validateAttachments([{ filename: 'big.bin', content: oversized }])).toThrow(
+      'exceeds the 25MB per-file limit',
+    );
+  });
+
+  it('throws when combined attachments exceed the total size limit', () => {
+    const chunk = Buffer.alloc(15 * 1024 * 1024).toString('base64');
+    const attachments = [
+      { filename: 'a.bin', content: chunk },
+      { filename: 'b.bin', content: chunk },
+      { filename: 'c.bin', content: chunk },
+    ];
+    expect(() => validateAttachments(attachments)).toThrow('combined limit');
   });
 });
 

@@ -8,6 +8,7 @@ import audit from '../safety/audit.js';
 import { validateInputLength } from '../safety/validation.js';
 
 import type SmtpService from '../services/smtp.service.js';
+import attachmentsSchema from './attachment-input.schema.js';
 
 export default function registerSendTools(server: McpServer, smtpService: SmtpService): void {
   // ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
   // ---------------------------------------------------------------------------
   server.tool(
     'send_email',
-    'Send a new email. Supports plain text or HTML body, CC, and BCC.',
+    'Send a new email. Supports plain text or HTML body, CC, BCC, and file attachments.',
     {
       account: z.string().describe('Account name from list_accounts'),
       to: z.array(z.string().email()).min(1).describe('Recipient email addresses'),
@@ -24,6 +25,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       cc: z.array(z.string().email()).optional().describe('CC recipients'),
       bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
       html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
@@ -80,6 +82,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       body: z.string().describe('Reply body content'),
       replyAll: z.boolean().default(false).describe('Reply to all recipients'),
       html: z.boolean().default(false).describe('Send as HTML'),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
@@ -134,6 +137,11 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       to: z.array(z.string().email()).min(1).describe('Forward to these recipients'),
       body: z.string().optional().describe('Additional message above the forwarded content'),
       cc: z.array(z.string().email()).optional().describe('CC recipients'),
+      includeOriginalAttachments: z
+        .boolean()
+        .default(false)
+        .describe("Re-attach the original email's own attachments to the forward"),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
