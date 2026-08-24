@@ -98,6 +98,7 @@ function loadFromEnv(): RawAppConfig | null {
         username: process.env.MCP_EMAIL_USERNAME,
         password,
         oauth2,
+        sent_mailbox: process.env.MCP_EMAIL_SENT_MAILBOX,
         imap: {
           host: imapHost,
           port: parseInt(process.env.MCP_EMAIL_IMAP_PORT ?? '993', 10),
@@ -160,6 +161,7 @@ function normalizeAccount(raw: RawAccountConfig): AccountConfig {
     username: raw.username ?? raw.email,
     password: raw.password,
     oauth2: raw.oauth2 ? normalizeOAuth2(raw.oauth2) : undefined,
+    sentMailbox: raw.sent_mailbox,
     imap: {
       host: raw.imap.host,
       port: raw.imap.port,
@@ -349,6 +351,9 @@ full_name = "Your Name"
 # username defaults to email if omitted
 # username = "you@example.com"
 password = "your-app-password"
+# Only needed if your IMAP server doesn't advertise a \\Sent special-use
+# folder — sent copies are otherwise found automatically via LIST.
+# sent_mailbox = "INBOX.Sent"
 
 [accounts.imap]
 host = "imap.example.com"

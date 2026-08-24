@@ -39,6 +39,7 @@ describe('Config Loader', () => {
       'MCP_EMAIL_SMTP_HOST',
       'MCP_EMAIL_READ_ONLY',
       'MCP_EMAIL_ACCOUNT_NAME',
+      'MCP_EMAIL_SENT_MAILBOX',
     ]) {
       savedEnv[key] = process.env[key];
       delete process.env[key];
@@ -74,6 +75,28 @@ describe('Config Loader', () => {
       expect(config.accounts[0].email).toBe('test@example.com');
       expect(config.accounts[0].imap.host).toBe('imap.example.com');
       expect(config.accounts[0].smtp.host).toBe('smtp.example.com');
+    });
+
+    it('reads sent_mailbox from the TOML account config', async () => {
+      const toml = `
+[[accounts]]
+name = "test"
+email = "test@example.com"
+password = "secret"
+sent_mailbox = "INBOX.Sent"
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+`;
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, toml, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.accounts[0].sentMailbox).toBe('INBOX.Sent');
     });
 
     it('throws when config file does not exist', async () => {
@@ -152,6 +175,29 @@ read_only = true
       expect(config.accounts[0].email).toBe('env@example.com');
       expect(config.accounts[0].imap.host).toBe('imap.env.com');
       expect(config.accounts[0].smtp.host).toBe('smtp.env.com');
+    });
+
+    it('reads sent_mailbox from MCP_EMAIL_SENT_MAILBOX', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_PASSWORD = 'env-pass';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+      process.env.MCP_EMAIL_SENT_MAILBOX = 'INBOX.Sent';
+
+      const config = await loadConfig(path.join(tmpDir, 'nonexistent.toml'));
+
+      expect(config.accounts[0].sentMailbox).toBe('INBOX.Sent');
+    });
+
+    it('leaves sentMailbox undefined when MCP_EMAIL_SENT_MAILBOX is not set', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_PASSWORD = 'env-pass';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+
+      const config = await loadConfig(path.join(tmpDir, 'nonexistent.toml'));
+
+      expect(config.accounts[0].sentMailbox).toBeUndefined();
     });
 
     it('reads read_only from MCP_EMAIL_READ_ONLY', async () => {

@@ -1091,6 +1091,46 @@ export default class ImapService {
   }
 
   // -------------------------------------------------------------------------
+  // Sent mailbox
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve the account's Sent mailbox path.
+   * Prefers the folder advertised with the \Sent special-use attribute,
+   * falling back to the account's configured `sentMailbox`, then "Sent".
+   */
+  async resolveSentMailbox(accountName: string): Promise<string> {
+    const client = await this.connections.getImapClient(accountName);
+    const account = this.connections.getAccount(accountName);
+
+    const mailboxes = await client.list();
+    const sent = mailboxes.find((mb) => mb.specialUse === '\\Sent');
+    if (sent) return sent.path;
+
+    return account.sentMailbox ?? 'Sent';
+  }
+
+  /**
+   * Append a raw, already-sent MIME message to the account's Sent mailbox,
+   * marked \Seen. Used to keep a Sent-folder copy in sync with SMTP sends
+   * that don't otherwise get archived by the mail server.
+   */
+  async appendToSent(
+    accountName: string,
+    rawMessage: Buffer,
+  ): Promise<{ mailbox: string; uid?: number }> {
+    const mailbox = await this.resolveSentMailbox(accountName);
+    const client = await this.connections.getImapClient(accountName);
+
+    const appendResult = await client.append(mailbox, rawMessage, ['\\Seen']);
+
+    return {
+      mailbox,
+      uid: (appendResult as unknown as { uid?: number }).uid,
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // Mailbox (folder) CRUD
   // -------------------------------------------------------------------------
 

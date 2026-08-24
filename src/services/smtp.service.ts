@@ -4,10 +4,23 @@
  * No MCP dependency — fully unit-testable.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
-import type { SendResult } from '../types/index.js';
+import type { AccountConfig, SendResult } from '../types/index.js';
+import { buildRawMessage } from '../utils/mail-message.js';
 import type ImapService from './imap.service.js';
+
+interface OutgoingMailFields {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  text?: string;
+  html?: string;
+  inReplyTo?: string;
+  references?: string;
+}
 
 export default class SmtpService {
   constructor(
@@ -32,23 +45,15 @@ export default class SmtpService {
     },
   ): Promise<SendResult> {
     this.checkRateLimit(accountName);
-
     const account = this.connections.getAccount(accountName);
-    const transport = await this.connections.getSmtpTransport(accountName);
 
-    const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
-      to: options.to.join(', '),
-      cc: options.cc?.join(', '),
-      bcc: options.bcc?.join(', '),
+    return this.composeSendAndArchive(accountName, account, {
+      to: options.to,
+      cc: options.cc,
+      bcc: options.bcc,
       subject: options.subject,
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -96,22 +101,14 @@ export default class SmtpService {
       ? original.subject
       : `Re: ${original.subject}`;
 
-    const transport = await this.connections.getSmtpTransport(accountName);
-
-    const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
-      to: to.join(', '),
-      cc: cc.length > 0 ? cc.join(', ') : undefined,
+    return this.composeSendAndArchive(accountName, account, {
+      to,
+      cc: cc.length > 0 ? cc : undefined,
       subject,
       inReplyTo: original.messageId,
       references: references.join(' '),
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -151,20 +148,12 @@ export default class SmtpService {
     const originalBody = original.bodyText ?? original.bodyHtml ?? '';
     const fullBody = (options.body ?? '') + forwardHeader + originalBody;
 
-    const transport = await this.connections.getSmtpTransport(accountName);
-
-    const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
-      to: options.to.join(', '),
-      cc: options.cc?.join(', '),
+    return this.composeSendAndArchive(accountName, account, {
+      to: options.to,
+      cc: options.cc,
       subject,
       text: fullBody,
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -195,15 +184,11 @@ export default class SmtpService {
     );
 
     const account = this.connections.getAccount(accountName);
-    const transport = await this.connections.getSmtpTransport(accountName);
 
-    const to = draft.to.map((a) => a.address).join(', ');
-    const cc = draft.cc?.map((a) => a.address).join(', ');
-
-    const result = await transport.sendMail({
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
-      to,
-      cc,
+    const result = await this.composeSendAndArchive(accountName, account, {
+      to: draft.to.map((a) => a.address),
+      cc: draft.cc?.map((a) => a.address),
+      bcc: draft.bcc?.map((a) => a.address),
       subject: draft.subject,
       inReplyTo: draft.inReplyTo,
       references: draft.references?.join(' '),
@@ -213,9 +198,64 @@ export default class SmtpService {
     // Delete the draft after successful send
     await this.imapService.deleteDraft(accountName, draftId, draftsPath);
 
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // Compose once, send over SMTP, then archive the exact same bytes to Sent
+  // -------------------------------------------------------------------------
+
+  /**
+   * Builds the raw MIME message once, sends those exact bytes over SMTP,
+   * then IMAP-appends the same bytes to the account's Sent mailbox.
+   *
+   * The Sent-mailbox copy is best-effort: the mail has already been
+   * accepted by SMTP by the time we attempt it, so a failure there is
+   * reported as a warning on the result rather than thrown.
+   */
+  private async composeSendAndArchive(
+    accountName: string,
+    account: AccountConfig,
+    fields: OutgoingMailFields,
+  ): Promise<SendResult> {
+    const transport = await this.connections.getSmtpTransport(accountName);
+
+    const domain = account.email.split('@')[1] ?? 'localhost';
+    const messageId = `<${randomUUID()}@${domain}>`;
+    const from = account.fullName ? `"${account.fullName}" <${account.email}>` : account.email;
+
+    const raw = await buildRawMessage({
+      from,
+      to: fields.to.join(', '),
+      cc: fields.cc?.length ? fields.cc.join(', ') : undefined,
+      bcc: fields.bcc?.length ? fields.bcc.join(', ') : undefined,
+      subject: fields.subject,
+      text: fields.text,
+      html: fields.html,
+      inReplyTo: fields.inReplyTo,
+      references: fields.references,
+      messageId,
+    });
+
+    const envelope = {
+      from: account.email,
+      to: [...fields.to, ...(fields.cc ?? []), ...(fields.bcc ?? [])],
     };
+
+    await transport.sendMail({ raw, envelope });
+
+    const result: SendResult = { messageId, status: 'sent' };
+
+    try {
+      const { mailbox } = await this.imapService.appendToSent(accountName, raw);
+      result.sentCopy = { saved: true, mailbox };
+    } catch (err) {
+      result.sentCopy = {
+        saved: false,
+        warning: `Could not save a copy to Sent: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    return result;
   }
 }
