@@ -66,6 +66,12 @@ export interface AccountConfig {
   username: string;
   password?: string;
   oauth2?: OAuth2Config;
+  /**
+   * Folder to file sent mail in. Set this when the server does not advertise
+   * SPECIAL-USE — the client then guesses the Sent folder by name, and on a
+   * mailbox carrying several sent-shaped folders the guess picks the wrong one.
+   */
+  sentMailbox?: string;
   imap: ImapConfig;
   smtp: SmtpConfig;
 }
@@ -202,6 +208,10 @@ export interface Email extends EmailMeta {
 export interface SendResult {
   messageId: string;
   status: 'sent' | 'failed';
+  /** Folder the Sent copy landed in, or null when filing it failed. */
+  archivedTo?: string | null;
+  /** Why the Sent copy could not be filed. Set only when archivedTo is null. */
+  archiveError?: string;
 }
 
 export interface PaginatedResult<T> {
