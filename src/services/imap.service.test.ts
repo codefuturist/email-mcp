@@ -18,6 +18,7 @@ function createMockImapClient() {
     messageDelete: vi.fn().mockResolvedValue(true),
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
+    append: vi.fn().mockResolvedValue({ uid: 7 }),
     _releaseFn: releaseFn,
   };
 }
@@ -163,6 +164,45 @@ describe('ImapService', () => {
       await service.setFlags('test', '10', 'INBOX', 'flag');
 
       expect(client.messageFlagsAdd).toHaveBeenCalledWith('10', ['\\Flagged'], { uid: true });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // appendToSent
+  // -----------------------------------------------------------------------
+
+  describe('appendToSent', () => {
+    it('files the copy in the folder the server flags as \\Sent', async () => {
+      client.list.mockResolvedValue([
+        { name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' },
+        { name: 'Drafts', path: 'INBOX.draft', specialUse: '\\Drafts' },
+        { name: 'Sent', path: 'INBOX.Sent Messages', specialUse: '\\Sent' },
+      ]);
+
+      const path = await service.appendToSent('test', Buffer.from('raw message'));
+
+      expect(path).toBe('INBOX.Sent Messages');
+      expect(client.append).toHaveBeenCalledWith(
+        'INBOX.Sent Messages',
+        Buffer.from('raw message'),
+        ['\\Seen'],
+      );
+    });
+
+    it('falls back to "Sent" when the server flags no folder', async () => {
+      client.list.mockResolvedValue([{ name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' }]);
+
+      const path = await service.appendToSent('test', Buffer.from('raw'));
+
+      expect(path).toBe('Sent');
+    });
+
+    it('marks the copy read so it does not show up as unread mail', async () => {
+      client.list.mockResolvedValue([{ name: 'Sent', path: 'Sent', specialUse: '\\Sent' }]);
+
+      await service.appendToSent('test', Buffer.from('raw'));
+
+      expect(client.append).toHaveBeenCalledWith('Sent', expect.any(Buffer), ['\\Seen']);
     });
   });
 });

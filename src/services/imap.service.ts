@@ -1079,6 +1079,25 @@ export default class ImapService {
     return { email, mailbox: draftsPath };
   }
 
+  /**
+   * File a copy of an outgoing message in the account's Sent folder.
+   *
+   * SMTP only hands the message to the next hop; nothing about sending puts a
+   * copy in the mailbox. Mail clients APPEND it themselves, so a server-side
+   * sender that skips this leaves no record of what it sent.
+   */
+  async appendToSent(accountName: string, raw: Buffer): Promise<string> {
+    const client = await this.connections.getImapClient(accountName);
+
+    const mailboxes = await client.list();
+    const sent = mailboxes.find((mb) => mb.specialUse === '\\Sent');
+    const sentPath = sent?.path ?? 'Sent';
+
+    await client.append(sentPath, raw, ['\\Seen']);
+
+    return sentPath;
+  }
+
   /** Delete a draft after it has been sent. */
   async deleteDraft(accountName: string, emailId: number, mailbox: string): Promise<void> {
     const client = await this.connections.getImapClient(accountName);

@@ -5,9 +5,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import audit from '../safety/audit.js';
-
 import type ImapService from '../services/imap.service.js';
 import type SmtpService from '../services/smtp.service.js';
+import sentCopyNote from '../utils/sent-copy.js';
 
 export default function registerDraftTools(
   server: McpServer,
@@ -94,7 +94,7 @@ export default function registerDraftTools(
           content: [
             {
               type: 'text' as const,
-              text: `✅ Draft sent (Message-ID: ${result.messageId}). Draft removed from folder.`,
+              text: `✅ Draft sent (Message-ID: ${result.messageId}). Draft removed from folder.${sentCopyNote(result)}`,
             },
           ],
         };
