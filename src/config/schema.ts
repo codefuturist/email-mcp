@@ -50,6 +50,7 @@ export const AccountConfigSchema = z
     username: z.string().optional(),
     password: z.string().optional(),
     oauth2: OAuth2ConfigSchema.optional(),
+    sent_mailbox: z.string().optional(),
     imap: ImapConfigSchema,
     smtp: SmtpConfigSchema,
   })
