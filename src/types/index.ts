@@ -66,6 +66,12 @@ export interface AccountConfig {
   username: string;
   password?: string;
   oauth2?: OAuth2Config;
+  /**
+   * Folder to file sent mail in. Set this when the server does not advertise
+   * SPECIAL-USE — the client then guesses the Sent folder by name, and on a
+   * mailbox carrying several sent-shaped folders the guess picks the wrong one.
+   */
+  sentMailbox?: string;
   imap: ImapConfig;
   smtp: SmtpConfig;
 }

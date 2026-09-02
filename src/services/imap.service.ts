@@ -1088,10 +1088,17 @@ export default class ImapService {
    */
   async appendToSent(accountName: string, raw: Buffer): Promise<string> {
     const client = await this.connections.getImapClient(accountName);
+    const account = this.connections.getAccount(accountName);
 
-    const mailboxes = await client.list();
-    const sent = mailboxes.find((mb) => mb.specialUse === '\\Sent');
-    const sentPath = sent?.path ?? 'Sent';
+    // A server that does not advertise SPECIAL-USE makes the client guess the
+    // Sent folder from its name, and the guess loses on a mailbox that carries
+    // several sent-shaped folders left by different clients over the years — it
+    // can land on an empty one nobody reads. `sent_mailbox` settles it.
+    let sentPath = account.sentMailbox;
+    if (!sentPath) {
+      const mailboxes = await client.list();
+      sentPath = mailboxes.find((mb) => mb.specialUse === '\\Sent')?.path ?? 'Sent';
+    }
 
     await client.append(sentPath, raw, ['\\Seen']);
 

@@ -197,6 +197,29 @@ describe('ImapService', () => {
       expect(path).toBe('Sent');
     });
 
+    it("prefers the configured sent_mailbox over the client's guess", async () => {
+      connections.getAccount.mockReturnValue({
+        name: 'test',
+        email: 'test@example.com',
+        username: 'test@example.com',
+        sentMailbox: 'INBOX.Sent Messages',
+        imap: { host: 'imap.example.com', port: 993, tls: true, starttls: false, verifySsl: true },
+        smtp: { host: 'smtp.example.com', port: 465, tls: true, starttls: false, verifySsl: true },
+      });
+      client.list.mockResolvedValue([
+        { name: 'Sent', path: 'INBOX.INBOX.Sent', specialUse: '\\Sent' },
+      ]);
+
+      const path = await service.appendToSent('test', Buffer.from('raw'));
+
+      expect(path).toBe('INBOX.Sent Messages');
+      expect(client.append).toHaveBeenCalledWith('INBOX.Sent Messages', expect.any(Buffer), [
+        '\\Seen',
+      ]);
+      // the override settles it, so there is nothing to look up
+      expect(client.list).not.toHaveBeenCalled();
+    });
+
     it('marks the copy read so it does not show up as unread mail', async () => {
       client.list.mockResolvedValue([{ name: 'Sent', path: 'Sent', specialUse: '\\Sent' }]);
 

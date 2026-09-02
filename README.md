@@ -367,6 +367,7 @@ name = "personal"
 email = "you@gmail.com"
 full_name = "Your Name"
 password = "your-app-password"
+# sent_mailbox = "INBOX.Sent Messages"   # optional, see below
 
 [accounts.imap]
 host = "imap.gmail.com"
@@ -385,6 +386,26 @@ enabled = true
 max_connections = 1
 max_messages = 100
 ```
+
+#### Where sent mail is filed
+
+A copy of every message sent through this server is filed in the account's Sent folder. The folder
+comes from the server's `\Sent` SPECIAL-USE flag (RFC 6154).
+
+Servers that do not advertise SPECIAL-USE leave the client to guess the folder by name. On a mailbox
+that has collected several sent-shaped folders over the years — `Sent`, `sent`, `Sent Messages`,
+`INBOX.Sent` — that guess can pick an empty one nobody reads. Set `sent_mailbox` on the account to
+settle it:
+
+```toml
+[[accounts]]
+name = "personal"
+email = "you@example.com"
+sent_mailbox = "INBOX.Sent Messages"
+```
+
+Use the folder's full IMAP path, as `list_mailboxes` reports it. When the copy cannot be filed, the
+message is still sent and the tool result says where it failed.
 
 #### OAuth2 _(experimental)_
 
