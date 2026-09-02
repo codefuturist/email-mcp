@@ -208,6 +208,10 @@ export interface Email extends EmailMeta {
 export interface SendResult {
   messageId: string;
   status: 'sent' | 'failed';
+  /** Folder the Sent copy landed in, or null when filing it failed. */
+  archivedTo?: string | null;
+  /** Why the Sent copy could not be filed. Set only when archivedTo is null. */
+  archiveError?: string;
 }
 
 export interface PaginatedResult<T> {
