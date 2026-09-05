@@ -65,6 +65,8 @@ export interface AccountConfig {
   fullName?: string;
   username: string;
   password?: string;
+  /** Command that produced `password`. Diagnostic only — never the secret. */
+  passwordCommand?: string;
   oauth2?: OAuth2Config;
   imap: ImapConfig;
   smtp: SmtpConfig;

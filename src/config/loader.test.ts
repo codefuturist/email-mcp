@@ -35,6 +35,7 @@ describe('Config Loader', () => {
     for (const key of [
       'MCP_EMAIL_ADDRESS',
       'MCP_EMAIL_PASSWORD',
+      'MCP_EMAIL_PASSWORD_COMMAND',
       'MCP_EMAIL_IMAP_HOST',
       'MCP_EMAIL_SMTP_HOST',
       'MCP_EMAIL_READ_ONLY',
@@ -170,6 +171,18 @@ host = "smtp.example.com"
       expect(config.accounts[0]?.password).toBe('secret123');
     });
 
+    it('exposes the command on the account for diagnostics', async () => {
+      const config = await loadWithAccountBody('password_command = "printf secret123"');
+
+      expect(config.accounts[0]?.passwordCommand).toBe('printf secret123');
+    });
+
+    it('leaves passwordCommand unset for a plaintext account', async () => {
+      const config = await loadWithAccountBody('password = "secret"');
+
+      expect(config.accounts[0]?.passwordCommand).toBeUndefined();
+    });
+
     it('trims trailing newline from command output', async () => {
       const config = await loadWithAccountBody('password_command = "echo secret123"');
 
@@ -267,6 +280,30 @@ host = "smtp.example.com"
       expect(config.accounts[0].email).toBe('env@example.com');
       expect(config.accounts[0].imap.host).toBe('imap.env.com');
       expect(config.accounts[0].smtp.host).toBe('smtp.env.com');
+    });
+
+    it('accepts MCP_EMAIL_PASSWORD_COMMAND instead of MCP_EMAIL_PASSWORD', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_PASSWORD_COMMAND = 'printf env-secret';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+
+      const config = await loadConfig(path.join(tmpDir, 'nonexistent.toml'));
+
+      expect(config.accounts[0].password).toBe('env-secret');
+      expect(config.accounts[0].passwordCommand).toBe('printf env-secret');
+    });
+
+    it('falls back to the config file when no credential env var is set', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.accounts[0].email).toBe('test@example.com');
     });
 
     it('reads read_only from MCP_EMAIL_READ_ONLY', async () => {

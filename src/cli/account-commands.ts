@@ -22,6 +22,7 @@ import {
 } from '@clack/prompts';
 
 import { CONFIG_FILE, configExists, loadRawConfig, saveConfig } from '../config/loader.js';
+import resolvePasswordCommand from '../config/password-command.js';
 import type { RawAccountConfig, RawAppConfig } from '../config/schema.js';
 import { AppConfigFileSchema } from '../config/schema.js';
 import ConnectionManager from '../connections/manager.js';
@@ -230,13 +231,22 @@ async function promptAccountIdentity(defaults?: {
   return { name, email, fullName };
 }
 
+/** Credentials collected from the prompts. Exactly one source is populated. */
+interface Credentials {
+  username: string;
+  password: string;
+  passwordCommand?: string;
+}
+
 /**
- * Prompt for credentials (username, password).
+ * Prompt for credentials — either a literal password or a command that prints
+ * one, so a secret need never be written to config.toml.
  */
 async function promptCredentials(defaults?: {
   username?: string;
   email?: string;
-}): Promise<{ username: string; password: string }> {
+  passwordCommand?: string;
+}): Promise<Credentials> {
   const username = await text({
     message: 'Username',
     placeholder: defaults?.email ?? 'you@example.com',
@@ -244,6 +254,32 @@ async function promptCredentials(defaults?: {
     initialValue: defaults?.username ?? defaults?.email,
   });
   assertNotCancel(username);
+
+  const source = await select({
+    message: 'Where does the password come from?',
+    options: [
+      {
+        value: 'command',
+        label: 'A command',
+        hint: 'password manager CLI — nothing secret is written to config.toml',
+      },
+      { value: 'password', label: 'Type it', hint: 'stored in plain text in config.toml' },
+    ],
+    initialValue: defaults?.passwordCommand ? 'command' : 'password',
+  });
+  assertNotCancel(source);
+
+  if (source === 'command') {
+    const passwordCommand = await text({
+      message: 'Command printing the password to stdout',
+      placeholder: 'security find-generic-password -s email-mcp-personal -w',
+      defaultValue: defaults?.passwordCommand,
+      initialValue: defaults?.passwordCommand,
+      validate: (v) => (!v || v.trim().length === 0 ? 'Command is required' : undefined),
+    });
+    assertNotCancel(passwordCommand);
+    return { username, password: '', passwordCommand };
+  }
 
   const password = await p_password({
     message: 'Password / App Password',
@@ -306,17 +342,24 @@ async function resolveServerSettings(
 /**
  * Build a normalized AccountConfig for connection testing.
  */
-function buildTestAccount(
+async function buildTestAccount(
   identity: { name: string; email: string; fullName: string },
-  creds: { username: string; password: string },
+  creds: Credentials,
   server: ServerSettings,
-): AccountConfig {
+): Promise<AccountConfig> {
+  // Resolve up front, so the connection test exercises the real credential
+  // rather than silently testing an empty password.
+  const password = creds.passwordCommand
+    ? await resolvePasswordCommand(creds.passwordCommand, identity.name)
+    : creds.password;
+
   return {
     name: identity.name,
     email: identity.email,
     fullName: identity.fullName || undefined,
     username: creds.username || identity.email,
-    password: creds.password,
+    password,
+    passwordCommand: creds.passwordCommand,
     imap: {
       host: server.imapHost,
       port: server.imapPort,
@@ -377,12 +420,23 @@ async function testConnections(account: AccountConfig): Promise<boolean> {
   return true;
 }
 
+/** The credential keys to write, given the source the user chose. */
+export function credentialFields(creds: Credentials): Partial<RawAccountConfig> {
+  if (creds.passwordCommand) {
+    return { password: undefined, password_command: creds.passwordCommand };
+  }
+  if (creds.password) {
+    return { password: creds.password, password_command: undefined };
+  }
+  return {};
+}
+
 /**
  * Build a RawAccountConfig from collected data.
  */
 function buildRawAccount(
   identity: { name: string; email: string; fullName: string },
-  creds: { username: string; password: string },
+  creds: Credentials,
   server: ServerSettings,
   existingAccount?: RawAccountConfig,
 ): RawAccountConfig {
@@ -394,12 +448,11 @@ function buildRawAccount(
     email: identity.email,
     full_name: identity.fullName || undefined,
     username: creds.username || identity.email,
-    // Only write a plaintext password when one was actually supplied, so a
-    // password_command or oauth2 account is not downgraded by an edit that
-    // never touched its credentials. When one *is* supplied, drop
-    // password_command — it would otherwise take precedence at load time and
-    // silently defeat the password the user just typed.
-    ...(creds.password ? { password: creds.password, password_command: undefined } : {}),
+    // Write exactly the credential source the user chose, clearing the other so
+    // a stale field cannot take precedence at load time. When neither was
+    // collected (an edit that never touched credentials), both are left to the
+    // spread above, so password_command and oauth2 survive.
+    ...credentialFields(creds),
     imap: {
       ...existingAccount?.imap,
       host: server.imapHost,
@@ -495,7 +548,7 @@ async function addAccount(): Promise<void> {
   const creds = await promptCredentials({ email: identity.email });
 
   // 4. Test connections
-  const testAccount = buildTestAccount(identity, creds, server);
+  const testAccount = await buildTestAccount(identity, creds, server);
   const ok = await testConnections(testAccount);
   if (!ok) return;
 
@@ -652,9 +705,10 @@ async function editAccount(nameArg?: string): Promise<void> {
     smtpPoolMaxConnections: current.smtp.pool?.max_connections ?? 1,
     smtpPoolMaxMessages: current.smtp.pool?.max_messages ?? 100,
   };
-  let creds = {
+  let creds: Credentials = {
     username: current.username ?? current.email,
     password: current.password ?? '',
+    passwordCommand: current.password_command,
   };
 
   if (fields === 'identity' || fields === 'all') {
@@ -681,6 +735,7 @@ async function editAccount(nameArg?: string): Promise<void> {
     creds = await promptCredentials({
       username: creds.username,
       email: identity.email,
+      passwordCommand: creds.passwordCommand,
     });
   }
 
@@ -692,7 +747,7 @@ async function editAccount(nameArg?: string): Promise<void> {
   assertNotCancel(shouldTest);
 
   if (shouldTest) {
-    const testAccount = buildTestAccount(identity, creds, server);
+    const testAccount = await buildTestAccount(identity, creds, server);
     const ok = await testConnections(testAccount);
     if (!ok) return;
   }

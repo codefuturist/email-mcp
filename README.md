@@ -456,7 +456,8 @@ For single-account setups (overrides config file):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MCP_EMAIL_ADDRESS` | *required* | Email address |
-| `MCP_EMAIL_PASSWORD` | *required* | Password or app password |
+| `MCP_EMAIL_PASSWORD` | *required*¹ | Password or app password |
+| `MCP_EMAIL_PASSWORD_COMMAND` | *required*¹ | Shell command printing the password to stdout (see [Resolving the password from a command](#resolving-the-password-from-a-command)) |
 | `MCP_EMAIL_IMAP_HOST` | *required* | IMAP server hostname |
 | `MCP_EMAIL_SMTP_HOST` | *required* | SMTP server hostname |
 | `MCP_EMAIL_ACCOUNT_NAME` | `default` | Account name |
@@ -472,6 +473,8 @@ For single-account setups (overrides config file):
 | `MCP_EMAIL_SMTP_POOL_MAX_CONNECTIONS` | `1` | Max pooled SMTP connections |
 | `MCP_EMAIL_SMTP_POOL_MAX_MESSAGES` | `100` | Max messages per pooled connection |
 | `MCP_EMAIL_RATE_LIMIT` | `10` | Max sends per minute |
+
+¹ One of `MCP_EMAIL_PASSWORD`, `MCP_EMAIL_PASSWORD_COMMAND`, or the OAuth2 variables is required.
 
 ### Email Scheduling
 

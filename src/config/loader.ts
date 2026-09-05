@@ -21,6 +21,7 @@ import { CONFIG_FILE, xdg } from './xdg.js';
 function loadFromEnv(): RawAppConfig | null {
   const email = process.env.MCP_EMAIL_ADDRESS;
   const password = process.env.MCP_EMAIL_PASSWORD;
+  const passwordCommand = process.env.MCP_EMAIL_PASSWORD_COMMAND;
   const imapHost = process.env.MCP_EMAIL_IMAP_HOST;
   const smtpHost = process.env.MCP_EMAIL_SMTP_HOST;
 
@@ -28,9 +29,9 @@ function loadFromEnv(): RawAppConfig | null {
     return null;
   }
 
-  // Need either password or OAuth2 env vars
+  // Need a password, a password command, or OAuth2 env vars
   const oauth2Provider = process.env.MCP_EMAIL_OAUTH2_PROVIDER;
-  if (!password && !oauth2Provider) {
+  if (!password && !passwordCommand && !oauth2Provider) {
     return null;
   }
 
@@ -98,6 +99,7 @@ function loadFromEnv(): RawAppConfig | null {
         full_name: process.env.MCP_EMAIL_FULL_NAME,
         username: process.env.MCP_EMAIL_USERNAME,
         password,
+        password_command: passwordCommand,
         oauth2,
         imap: {
           host: imapHost,
@@ -167,6 +169,7 @@ async function normalizeAccount(raw: RawAccountConfig): Promise<AccountConfig> {
     fullName: raw.full_name,
     username: raw.username ?? raw.email,
     password,
+    passwordCommand: raw.password_command,
     oauth2: raw.oauth2 ? normalizeOAuth2(raw.oauth2) : undefined,
     imap: {
       host: raw.imap.host,
