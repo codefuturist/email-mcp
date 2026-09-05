@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import type ImapService from '../services/imap.service.js';
 import type { Email, EmailMeta } from '../types/index.js';
+import { classifyBulk } from '../utils/bulk-headers.js';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -16,6 +17,18 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * Renders the bulk-mail signal, or an empty string for personal mail.
+ * Compact by design: it is repeated for every item of a listing.
+ */
+function formatBulk(bulk: EmailMeta['bulk']): string {
+  if (!bulk) return '';
+  const marker = bulk.kind === 'newsletter' ? '📰 newsletter' : '🤖 automated';
+  const listId = bulk.listId ? ` (${bulk.listId})` : '';
+  const unsub = bulk.unsubscribe ? ` · unsub${bulk.oneClick ? ' 1-click' : ''}` : '';
+  return `${marker}${listId}${unsub}`;
 }
 
 function formatEmailMeta(email: EmailMeta): string {
@@ -30,8 +43,10 @@ function formatEmailMeta(email: EmailMeta): string {
 
   const from = email.from.name ? `${email.from.name} <${email.from.address}>` : email.from.address;
   const labelStr = email.labels.length > 0 ? `\n  🏷️ ${email.labels.join(', ')}` : '';
+  const bulk = formatBulk(email.bulk);
+  const bulkStr = bulk ? `\n  ${bulk}` : '';
 
-  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${email.preview ? `\n  ${email.preview}` : ''}`;
+  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${bulkStr}${email.preview ? `\n  ${email.preview}` : ''}`;
 }
 
 /** Strips HTML markup and decodes common entities to produce readable plain text. */
@@ -117,6 +132,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     'list_emails',
     'List emails in a mailbox with optional filters. Returns paginated results with metadata ' +
       '(read/unread 🔵, flagged ⭐, replied ↩️, attachments 📎, labels 🏷️). ' +
+      'List or machine-generated mail is marked 📰 newsletter / 🤖 automated from its RFC headers, with the unsubscribe URI when the sender offers one — personal mail carries no marker. ' +
       'Use get_email to fetch full body content. ' +
       'ProtonMail note: labels are represented as IMAP folders — use list_labels to discover them, ' +
       'then list_emails with mailbox="Labels/X" to find labeled emails.',
@@ -236,6 +252,11 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
 
         parts.push(`Date:   ${email.date}`);
         parts.push(`ID:     ${email.messageId}`);
+
+        const bulk = formatBulk(classifyBulk(email.headers));
+        if (bulk) {
+          parts.push(`Bulk:   ${bulk}`);
+        }
 
         if (email.inReplyTo) {
           parts.push(`Reply:  ${email.inReplyTo}`);

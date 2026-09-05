@@ -22,6 +22,7 @@ import type {
   QuotaInfo,
   SenderStat,
 } from '../types/index.js';
+import { BULK_HEADER_FIELDS, classifyBulk, parseHeaderBlock } from '../utils/bulk-headers.js';
 import type { LabelStrategy } from './label-strategy.js';
 import { detectLabelStrategy } from './label-strategy.js';
 
@@ -125,6 +126,12 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
     }
   }
 
+  // BODY.PEEK[HEADER.FIELDS (...)] comes back as a raw buffer.
+  const bulk =
+    msg.headers && Buffer.isBuffer(msg.headers)
+      ? classifyBulk(parseHeaderBlock(msg.headers.toString('utf-8')))
+      : undefined;
+
   return {
     id: String(msg.uid ?? msg.seq),
     subject: (envelope.subject as string) ?? '(no subject)',
@@ -139,6 +146,7 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
     hasAttachments: hasAttachments(msg.bodyStructure),
     labels,
     preview,
+    bulk,
   };
 }
 
@@ -159,16 +167,9 @@ async function messageToEmail(
     const raw = msg.source.toString('utf-8');
     const headerEnd = raw.indexOf('\r\n\r\n');
     if (headerEnd >= 0) {
-      // Parse headers
-      const headerSection = raw.slice(0, headerEnd);
-      headerSection.split('\r\n').forEach((line) => {
-        const colonIdx = line.indexOf(':');
-        if (colonIdx > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
-          const key = line.slice(0, colonIdx).trim().toLowerCase();
-          const value = line.slice(colonIdx + 1).trim();
-          headers[key] = value;
-        }
-      });
+      // parseHeaderBlock unfolds RFC 5322 continuation lines; naive line
+      // splitting truncates folded fields such as List-Unsubscribe.
+      Object.assign(headers, parseHeaderBlock(raw.slice(0, headerEnd)));
 
       const body = raw.slice(headerEnd + 4);
       // Simple content type detection
@@ -377,6 +378,7 @@ export default class ImapService {
           flags: true,
           bodyStructure: true,
           source: { start: 0, maxLength: 256 },
+          headers: BULK_HEADER_FIELDS,
         },
         { uid: true },
       )) {
@@ -603,6 +605,7 @@ export default class ImapService {
           flags: true,
           bodyStructure: true,
           source: { start: 0, maxLength: 256 },
+          headers: BULK_HEADER_FIELDS,
         },
         { uid: true },
       )) {

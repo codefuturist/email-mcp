@@ -163,6 +163,19 @@ export interface Mailbox {
 // Email
 // ---------------------------------------------------------------------------
 
+/** How a message was originated, when its headers say so. */
+export type BulkKind = 'newsletter' | 'automated';
+
+export interface BulkSignal {
+  kind: BulkKind;
+  /** RFC 2919 list identifier, without its angle brackets. */
+  listId?: string;
+  /** Most actionable RFC 2369 unsubscribe URI (https preferred over mailto). */
+  unsubscribe?: string;
+  /** RFC 8058 one-click unsubscribe is supported. */
+  oneClick: boolean;
+}
+
 export interface EmailMeta {
   id: string;
   subject: string;
@@ -175,6 +188,8 @@ export interface EmailMeta {
   hasAttachments: boolean;
   labels: string[];
   preview?: string;
+  /** Set only for list or machine-generated mail; absent for personal mail. */
+  bulk?: BulkSignal;
 }
 
 export interface AttachmentMeta {
