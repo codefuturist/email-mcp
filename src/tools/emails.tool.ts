@@ -208,7 +208,9 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
       'Does NOT mark the email as seen (uses IMAP BODY.PEEK — non-destructive). ' +
       'Use format="text" to strip HTML, or format="stripped" to also remove quoted replies and signatures. ' +
       'Use maxLength to cap the body size for large emails. ' +
-      'Set markRead=true only when you want to explicitly mark the email as read.',
+      'Set markRead=true only when you want to explicitly mark the email as read. ' +
+      'A Bulk: line appears for list or machine-generated mail (📰 newsletter / 🤖 automated), ' +
+      'derived from RFC headers, with the unsubscribe URI when the sender offers one.',
     {
       account: z.string().describe('Account name from list_accounts'),
       emailId: z.string().describe('Email ID from list_emails or search_emails'),
@@ -443,7 +445,8 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     'Search emails by keyword across subject, sender, and body. ' +
       'Omit query (or pass an empty string) to use it as a pure filter — e.g. find all emails ' +
       'with attachments from a specific recipient without a keyword. ' +
-      'Supports additional filters for recipient, attachments, size, and reply status.',
+      'Supports additional filters for recipient, attachments, size, and reply status. ' +
+      'Results carry the same 📰 newsletter / 🤖 automated markers as list_emails.',
     {
       account: z.string().describe('Account name from list_accounts'),
       query: z
