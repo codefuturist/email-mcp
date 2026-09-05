@@ -136,6 +136,121 @@ read_only = true
   });
 
   // -------------------------------------------------------------------------
+  // password_command
+  // -------------------------------------------------------------------------
+
+  // These use POSIX shell builtins (printf, echo, exit, true, 1>&2) rather
+  // than mocking node:child_process, so the parts worth covering — newline
+  // trimming, stdout/stderr separation, error shape — are actually exercised.
+  describe('password_command', () => {
+    async function loadWithAccountBody(body: string) {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(
+        configPath,
+        `
+[[accounts]]
+name = "test"
+email = "test@example.com"
+${body}
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+`,
+        'utf-8',
+      );
+      return loadConfig(configPath);
+    }
+
+    it('resolves the account password by running password_command', async () => {
+      const config = await loadWithAccountBody('password_command = "printf secret123"');
+
+      expect(config.accounts[0]?.password).toBe('secret123');
+    });
+
+    it('trims trailing newline from command output', async () => {
+      const config = await loadWithAccountBody('password_command = "echo secret123"');
+
+      expect(config.accounts[0]?.password).toBe('secret123');
+    });
+
+    it('prefers password_command over an inline password', async () => {
+      const config = await loadWithAccountBody(
+        'password = "inline"\npassword_command = "printf from-command"',
+      );
+
+      expect(config.accounts[0]?.password).toBe('from-command');
+    });
+
+    it('resolves password_command for every account', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(
+        configPath,
+        `
+[[accounts]]
+name = "first"
+email = "first@example.com"
+password_command = "printf first-secret"
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+
+[[accounts]]
+name = "second"
+email = "second@example.com"
+password_command = "printf second-secret"
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+`,
+        'utf-8',
+      );
+
+      const config = await loadConfig(configPath);
+
+      expect(config.accounts[0]?.password).toBe('first-secret');
+      expect(config.accounts[1]?.password).toBe('second-secret');
+    });
+
+    it('names the failing account when password_command exits non-zero', async () => {
+      await expect(loadWithAccountBody('password_command = "exit 7"')).rejects.toThrow(
+        'password_command for account "test"',
+      );
+    });
+
+    it('does not leak command stdout into the error message', async () => {
+      const loading = loadWithAccountBody('password_command = "echo leaked-secret; exit 1"');
+
+      await expect(loading).rejects.toThrow('password_command for account "test"');
+      await expect(loading).rejects.toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining('leaked-secret') as unknown as string,
+        }),
+      );
+    });
+
+    it('includes command stderr in the failure message', async () => {
+      await expect(
+        loadWithAccountBody('password_command = "echo vault-is-locked 1>&2; exit 1"'),
+      ).rejects.toThrow('vault-is-locked');
+    });
+
+    it('throws when password_command produces no output', async () => {
+      await expect(loadWithAccountBody('password_command = "true"')).rejects.toThrow(
+        'produced no output',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // loadConfig from environment variables
   // -------------------------------------------------------------------------
 

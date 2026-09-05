@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
 import type { AccountConfig, AppConfig, HookRule, OAuth2Config } from '../types/index.js';
+import resolvePasswordCommand from './password-command.js';
 import type { RawAccountConfig, RawAppConfig } from './schema.js';
 import { AppConfigFileSchema } from './schema.js';
 import { CONFIG_FILE, xdg } from './xdg.js';
@@ -152,13 +153,20 @@ function normalizeOAuth2(raw: NonNullable<RawAccountConfig['oauth2']>): OAuth2Co
   };
 }
 
-function normalizeAccount(raw: RawAccountConfig): AccountConfig {
+async function normalizeAccount(raw: RawAccountConfig): Promise<AccountConfig> {
+  // password_command wins over an inline password: the explicit, more secure
+  // field must not be silently defeated by a plaintext line left behind
+  // during migration.
+  const password = raw.password_command
+    ? await resolvePasswordCommand(raw.password_command, raw.name)
+    : raw.password;
+
   return {
     name: raw.name,
     email: raw.email,
     fullName: raw.full_name,
     username: raw.username ?? raw.email,
-    password: raw.password,
+    password,
     oauth2: raw.oauth2 ? normalizeOAuth2(raw.oauth2) : undefined,
     imap: {
       host: raw.imap.host,
@@ -205,7 +213,7 @@ function normalizeHookRule(raw: {
   };
 }
 
-function normalizeConfig(raw: RawAppConfig): AppConfig {
+async function normalizeConfig(raw: RawAppConfig): Promise<AppConfig> {
   return {
     settings: {
       rateLimit: raw.settings.rate_limit,
@@ -237,7 +245,7 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
         calendarConfirm: raw.settings.hooks.calendar_confirm ?? true,
       },
     },
-    accounts: raw.accounts.map(normalizeAccount),
+    accounts: await Promise.all(raw.accounts.map(normalizeAccount)),
   };
 }
 
@@ -349,6 +357,10 @@ full_name = "Your Name"
 # username defaults to email if omitted
 # username = "you@example.com"
 password = "your-app-password"
+# ...or resolve it from an external command instead (stdout is trimmed, runs at startup):
+# password_command = "security find-generic-password -s email-mcp-personal -w"
+# password_command = "bw get password personal-email"
+# password_command = "op read 'op://Private/personal-email/password'"
 
 [accounts.imap]
 host = "imap.example.com"

@@ -49,13 +49,18 @@ export const AccountConfigSchema = z
     full_name: z.string().optional(),
     username: z.string().optional(),
     password: z.string().optional(),
+    /** Shell command whose trimmed stdout is used as the password. */
+    password_command: z.string().min(1, 'password_command cannot be empty').optional(),
     oauth2: OAuth2ConfigSchema.optional(),
     imap: ImapConfigSchema,
     smtp: SmtpConfigSchema,
   })
-  .refine((data) => data.password ?? data.oauth2, {
-    message: 'Either password or oauth2 config is required',
-  });
+  // Boolean() rather than a ?? chain: ?? short-circuits on non-nullish, so a
+  // leftover `password = ""` would swallow a valid password_command.
+  .refine(
+    (data) => Boolean(data.password) || Boolean(data.password_command) || Boolean(data.oauth2),
+    { message: 'Either password_command, password or oauth2 config is required' },
+  );
 
 export const WatcherConfigSchema = z.object({
   enabled: z.boolean().default(false),

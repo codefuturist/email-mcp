@@ -384,26 +384,37 @@ function buildRawAccount(
   identity: { name: string; email: string; fullName: string },
   creds: { username: string; password: string },
   server: ServerSettings,
+  existingAccount?: RawAccountConfig,
 ): RawAccountConfig {
   return {
+    // Spread the existing account first so fields the prompts never collect
+    // (password_command, oauth2, ...) survive an edit instead of being dropped.
+    ...existingAccount,
     name: identity.name,
     email: identity.email,
     full_name: identity.fullName || undefined,
     username: creds.username || identity.email,
-    password: creds.password,
+    // Only write a plaintext password when one was actually supplied, so a
+    // password_command or oauth2 account is not downgraded by an edit that
+    // never touched its credentials. When one *is* supplied, drop
+    // password_command — it would otherwise take precedence at load time and
+    // silently defeat the password the user just typed.
+    ...(creds.password ? { password: creds.password, password_command: undefined } : {}),
     imap: {
+      ...existingAccount?.imap,
       host: server.imapHost,
       port: server.imapPort,
       tls: server.imapTls,
       starttls: !server.imapTls,
-      verify_ssl: true,
+      verify_ssl: existingAccount?.imap.verify_ssl ?? true,
     },
     smtp: {
+      ...existingAccount?.smtp,
       host: server.smtpHost,
       port: server.smtpPort,
       tls: server.smtpTls,
       starttls: server.smtpStarttls,
-      verify_ssl: true,
+      verify_ssl: existingAccount?.smtp.verify_ssl ?? true,
       pool: {
         enabled: server.smtpPoolEnabled,
         max_connections: server.smtpPoolMaxConnections,
@@ -687,7 +698,7 @@ async function editAccount(nameArg?: string): Promise<void> {
   }
 
   // Save updated account
-  const updatedAccount = buildRawAccount(identity, creds, server);
+  const updatedAccount = buildRawAccount(identity, creds, server, current);
   const updatedAccounts = [...accounts];
   updatedAccounts[accountIndex] = updatedAccount;
 
