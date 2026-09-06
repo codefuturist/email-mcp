@@ -66,6 +66,17 @@ export interface AccountConfig {
   username: string;
   password?: string;
   oauth2?: OAuth2Config;
+  /**
+   * Folder to file sent mail in. Set this when the server does not advertise
+   * SPECIAL-USE — the client then guesses the Sent folder by name, and on a
+   * mailbox carrying several sent-shaped folders the guess picks the wrong one.
+   */
+  sentMailbox?: string;
+  /**
+   * File a copy of outgoing mail in the Sent folder. Defaults to true, except
+   * on servers that already file sent mail themselves — see appendToSent.
+   */
+  saveToSent?: boolean;
   imap: ImapConfig;
   smtp: SmtpConfig;
 }
@@ -199,9 +210,27 @@ export interface Email extends EmailMeta {
 // Results
 // ---------------------------------------------------------------------------
 
+/**
+ * What happened to the copy of an outgoing message in the Sent folder.
+ *
+ * Three states, not two. A copy the server files itself is skipped on purpose,
+ * and reporting that as a missing copy is a lie on every Gmail send. Adding a
+ * fourth variant breaks `tsc` in each consumer that branches here — the union
+ * exists so the next state cannot arrive in silence the way this one did.
+ *
+ * `skipped` carries no reason: `ImapService.appendToSent` returns a bare null
+ * for both causes (server files it, or `save_to_sent = false`), and one neutral
+ * sentence is true of both.
+ */
+export type SentCopy =
+  | { kind: 'filed'; path: string }
+  | { kind: 'skipped' }
+  | { kind: 'failed'; error: string };
+
 export interface SendResult {
   messageId: string;
   status: 'sent' | 'failed';
+  sentCopy: SentCopy;
 }
 
 export interface PaginatedResult<T> {

@@ -38,7 +38,9 @@ function createMockRateLimiter(allowed = true) {
 }
 
 function createMockImapService() {
-  return {} as unknown as ImapService;
+  return {
+    appendToSent: vi.fn().mockResolvedValue('INBOX.Sent'),
+  } as unknown as ImapService;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,13 +51,15 @@ describe('SmtpService', () => {
   let transport: ReturnType<typeof createMockTransport>;
   let connections: ReturnType<typeof createMockConnectionManager>;
   let rateLimiter: RateLimiter;
+  let imapService: ReturnType<typeof createMockImapService>;
   let service: SmtpService;
 
   beforeEach(() => {
     transport = createMockTransport();
     connections = createMockConnectionManager(transport);
     rateLimiter = createMockRateLimiter(true);
-    service = new SmtpService(connections, rateLimiter, createMockImapService());
+    imapService = createMockImapService();
+    service = new SmtpService(connections, rateLimiter, imapService);
   });
 
   describe('sendEmail', () => {
@@ -69,6 +73,7 @@ describe('SmtpService', () => {
       expect(result).toEqual({
         messageId: '<test@example.com>',
         status: 'sent',
+        sentCopy: { kind: 'filed', path: 'INBOX.Sent' },
       });
       expect(transport.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -123,6 +128,152 @@ describe('SmtpService', () => {
       const call = transport.sendMail.mock.calls[0][0];
       expect(call.html).toBe('<h1>Hello</h1>');
       expect(call.text).toBeUndefined();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Sent copy
+  // -----------------------------------------------------------------------
+
+  describe('filing a copy in Sent', () => {
+    it('files every sent message and reports the folder', async () => {
+      const result = await service.sendEmail('test', {
+        to: ['recipient@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(imapService.appendToSent).toHaveBeenCalledOnce();
+      expect(result.sentCopy).toEqual({ kind: 'filed', path: 'INBOX.Sent' });
+    });
+
+    it('files a copy carrying the Message-ID that SMTP returned', async () => {
+      transport.sendMail.mockResolvedValue({ messageId: '<real-id@example.com>' });
+
+      await service.sendEmail('test', {
+        to: ['recipient@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      const [, raw] = (imapService.appendToSent as unknown as ReturnType<typeof vi.fn>).mock
+        .calls[0] as [string, Buffer];
+      expect(raw.toString()).toContain('Message-ID: <real-id@example.com>');
+      expect(raw.toString()).toContain('Subject: Hello');
+    });
+
+    it('reports a send as sent even when filing the copy fails', async () => {
+      (imapService.appendToSent as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('NO [TRYCREATE] Mailbox does not exist'),
+      );
+
+      const result = await service.sendEmail('test', {
+        to: ['recipient@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(result.status).toBe('sent');
+      expect(result.messageId).toBe('<test@example.com>');
+      expect(result.sentCopy).toEqual({
+        kind: 'failed',
+        error: expect.stringContaining('Mailbox does not exist'),
+      });
+    });
+
+    // The guard returns a bare null where the server files sent mail itself.
+    // Before the union that was indistinguishable from a copy that failed.
+    it('reports the copy as skipped when the server files it itself', async () => {
+      (imapService.appendToSent as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const result = await service.sendEmail('test', {
+        to: ['recipient@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(result.status).toBe('sent');
+      expect(result.sentCopy).toEqual({ kind: 'skipped' });
+    });
+
+    it('files a copy for replies, forwards and drafts too, not only plain sends', async () => {
+      const imap = imapService as unknown as {
+        appendToSent: ReturnType<typeof vi.fn>;
+        getEmail: ReturnType<typeof vi.fn>;
+        fetchDraft: ReturnType<typeof vi.fn>;
+        deleteDraft: ReturnType<typeof vi.fn>;
+      };
+      imap.getEmail = vi.fn().mockResolvedValue({
+        from: { address: 'them@example.com' },
+        to: [{ address: 'test@example.com' }],
+        subject: 'Original',
+        messageId: '<orig@example.com>',
+        date: '2026-01-01',
+        bodyText: 'body',
+      });
+      imap.fetchDraft = vi.fn().mockResolvedValue({
+        email: {
+          to: [{ address: 'recipient@example.com' }],
+          subject: 'Draft',
+          bodyText: 'draft body',
+        },
+        mailbox: 'INBOX.Drafts',
+      });
+      imap.deleteDraft = vi.fn().mockResolvedValue(undefined);
+
+      await service.replyToEmail('test', { emailId: '1', body: 'reply' });
+      await service.forwardEmail('test', { emailId: '1', to: ['other@example.com'] });
+      await service.sendDraft('test', 1);
+
+      expect(imap.appendToSent).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('send_draft and the last remaining copy', () => {
+    function mockDraft() {
+      const imap = imapService as unknown as {
+        appendToSent: ReturnType<typeof vi.fn>;
+        fetchDraft: ReturnType<typeof vi.fn>;
+        deleteDraft: ReturnType<typeof vi.fn>;
+      };
+      imap.fetchDraft = vi.fn().mockResolvedValue({
+        email: { to: [{ address: 'recipient@example.com' }], subject: 'D', bodyText: 'b' },
+        mailbox: 'INBOX.Drafts',
+      });
+      imap.deleteDraft = vi.fn().mockResolvedValue(undefined);
+      return imap;
+    }
+
+    it('removes the draft once the copy is filed', async () => {
+      const imap = mockDraft();
+
+      const result = await service.sendDraft('test', 1);
+
+      expect(imap.deleteDraft).toHaveBeenCalledOnce();
+      expect(result.draft).toBe('removed');
+    });
+
+    // Without the copy there is nothing left but the draft. Deleting it here is
+    // how sending a draft used to destroy the message outright.
+    it('keeps the draft when the Sent copy failed', async () => {
+      const imap = mockDraft();
+      imap.appendToSent.mockRejectedValue(new Error('NO [TRYCREATE] Mailbox does not exist'));
+
+      const result = await service.sendDraft('test', 1);
+
+      expect(imap.deleteDraft).not.toHaveBeenCalled();
+      expect(result.draft).toBe('kept');
+      expect(result.sentCopy.kind).toBe('failed');
+    });
+
+    it('removes the draft when the copy was skipped on purpose', async () => {
+      const imap = mockDraft();
+      imap.appendToSent.mockResolvedValue(null);
+
+      const result = await service.sendDraft('test', 1);
+
+      expect(imap.deleteDraft).toHaveBeenCalledOnce();
+      expect(result.draft).toBe('removed');
     });
   });
 });

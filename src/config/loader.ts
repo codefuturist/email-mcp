@@ -160,6 +160,8 @@ function normalizeAccount(raw: RawAccountConfig): AccountConfig {
     username: raw.username ?? raw.email,
     password: raw.password,
     oauth2: raw.oauth2 ? normalizeOAuth2(raw.oauth2) : undefined,
+    sentMailbox: raw.sent_mailbox,
+    saveToSent: raw.save_to_sent,
     imap: {
       host: raw.imap.host,
       port: raw.imap.port,

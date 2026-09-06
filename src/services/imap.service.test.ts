@@ -18,6 +18,8 @@ function createMockImapClient() {
     messageDelete: vi.fn().mockResolvedValue(true),
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
+    append: vi.fn().mockResolvedValue({ uid: 7 }),
+    capabilities: new Set<string>(),
     _releaseFn: releaseFn,
   };
 }
@@ -163,6 +165,102 @@ describe('ImapService', () => {
       await service.setFlags('test', '10', 'INBOX', 'flag');
 
       expect(client.messageFlagsAdd).toHaveBeenCalledWith('10', ['\\Flagged'], { uid: true });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // appendToSent
+  // -----------------------------------------------------------------------
+
+  describe('appendToSent', () => {
+    it('files the copy in the folder the server flags as \\Sent', async () => {
+      client.list.mockResolvedValue([
+        { name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' },
+        { name: 'Drafts', path: 'INBOX.draft', specialUse: '\\Drafts' },
+        { name: 'Sent', path: 'INBOX.Sent Messages', specialUse: '\\Sent' },
+      ]);
+
+      const path = await service.appendToSent('test', Buffer.from('raw message'));
+
+      expect(path).toBe('INBOX.Sent Messages');
+      expect(client.append).toHaveBeenCalledWith(
+        'INBOX.Sent Messages',
+        Buffer.from('raw message'),
+        ['\\Seen'],
+      );
+    });
+
+    it('falls back to "Sent" when the server flags no folder', async () => {
+      client.list.mockResolvedValue([{ name: 'INBOX', path: 'INBOX', specialUse: '\\Inbox' }]);
+
+      const path = await service.appendToSent('test', Buffer.from('raw'));
+
+      expect(path).toBe('Sent');
+    });
+
+    it("prefers the configured sent_mailbox over the client's guess", async () => {
+      connections.getAccount.mockReturnValue({
+        name: 'test',
+        email: 'test@example.com',
+        username: 'test@example.com',
+        sentMailbox: 'INBOX.Sent Messages',
+        imap: { host: 'imap.example.com', port: 993, tls: true, starttls: false, verifySsl: true },
+        smtp: { host: 'smtp.example.com', port: 465, tls: true, starttls: false, verifySsl: true },
+      });
+      client.list.mockResolvedValue([
+        { name: 'Sent', path: 'INBOX.INBOX.Sent', specialUse: '\\Sent' },
+      ]);
+
+      const path = await service.appendToSent('test', Buffer.from('raw'));
+
+      expect(path).toBe('INBOX.Sent Messages');
+      expect(client.append).toHaveBeenCalledWith('INBOX.Sent Messages', expect.any(Buffer), [
+        '\\Seen',
+      ]);
+      // the override settles it, so there is nothing to look up
+      expect(client.list).not.toHaveBeenCalled();
+    });
+
+    // Gmail files SMTP sends into Sent Mail itself; appending on top of that
+    // gives the user every sent message twice.
+    it('skips the copy on a server that files sent mail itself', async () => {
+      const gmailClient = createMockImapClient();
+      gmailClient.capabilities.add('X-GM-EXT-1');
+      const svc = new ImapService(createMockConnectionManager(gmailClient) as never);
+
+      const path = await svc.appendToSent('test', Buffer.from('raw'));
+
+      expect(path).toBeNull();
+      expect(gmailClient.append).not.toHaveBeenCalled();
+    });
+
+    it('files the copy anyway when the account asks for it explicitly', async () => {
+      const gmailClient = createMockImapClient();
+      gmailClient.capabilities.add('X-GM-EXT-1');
+      const manager = createMockConnectionManager(gmailClient);
+      manager.getAccount = vi.fn().mockReturnValue({ name: 'test', saveToSent: true });
+      const svc = new ImapService(manager as never);
+
+      expect(await svc.appendToSent('test', Buffer.from('raw'))).not.toBeNull();
+      expect(gmailClient.append).toHaveBeenCalledOnce();
+    });
+
+    it('honours save_to_sent = false on a server that does not file it', async () => {
+      const plainClient = createMockImapClient();
+      const manager = createMockConnectionManager(plainClient);
+      manager.getAccount = vi.fn().mockReturnValue({ name: 'test', saveToSent: false });
+      const svc = new ImapService(manager as never);
+
+      expect(await svc.appendToSent('test', Buffer.from('raw'))).toBeNull();
+      expect(plainClient.append).not.toHaveBeenCalled();
+    });
+
+    it('marks the copy read so it does not show up as unread mail', async () => {
+      client.list.mockResolvedValue([{ name: 'Sent', path: 'Sent', specialUse: '\\Sent' }]);
+
+      await service.appendToSent('test', Buffer.from('raw'));
+
+      expect(client.append).toHaveBeenCalledWith('Sent', expect.any(Buffer), ['\\Seen']);
     });
   });
 });

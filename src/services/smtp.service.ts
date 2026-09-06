@@ -4,6 +4,9 @@
  * No MCP dependency — fully unit-testable.
  */
 
+import MailComposer from 'nodemailer/lib/mail-composer/index.js';
+import type Mail from 'nodemailer/lib/mailer/index.js';
+
 import type { IConnectionManager } from '../connections/types.js';
 import type RateLimiter from '../safety/rate-limiter.js';
 import type { SendResult } from '../types/index.js';
@@ -34,9 +37,8 @@ export default class SmtpService {
     this.checkRateLimit(accountName);
 
     const account = this.connections.getAccount(accountName);
-    const transport = await this.connections.getSmtpTransport(accountName);
 
-    const result = await transport.sendMail({
+    return this.dispatch(accountName, {
       from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
@@ -44,11 +46,6 @@ export default class SmtpService {
       subject: options.subject,
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -96,9 +93,7 @@ export default class SmtpService {
       ? original.subject
       : `Re: ${original.subject}`;
 
-    const transport = await this.connections.getSmtpTransport(accountName);
-
-    const result = await transport.sendMail({
+    return this.dispatch(accountName, {
       from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
       to: to.join(', '),
       cc: cc.length > 0 ? cc.join(', ') : undefined,
@@ -107,11 +102,6 @@ export default class SmtpService {
       references: references.join(' '),
       ...(options.html ? { html: options.body } : { text: options.body }),
     });
-
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -151,20 +141,53 @@ export default class SmtpService {
     const originalBody = original.bodyText ?? original.bodyHtml ?? '';
     const fullBody = (options.body ?? '') + forwardHeader + originalBody;
 
-    const transport = await this.connections.getSmtpTransport(accountName);
-
-    const result = await transport.sendMail({
+    return this.dispatch(accountName, {
       from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       subject,
       text: fullBody,
     });
+  }
 
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
+  // -------------------------------------------------------------------------
+  // Send + file a copy
+  // -------------------------------------------------------------------------
+
+  /**
+   * Hand the message to SMTP, then file a copy in Sent.
+   *
+   * `date` and `messageId` are pinned so the filed copy is the message that
+   * actually went out, not a lookalike rebuilt from the same fields — a reply
+   * threads against that Message-ID.
+   */
+  private async dispatch(accountName: string, message: Mail.Options): Promise<SendResult> {
+    const transport = await this.connections.getSmtpTransport(accountName);
+
+    const date = new Date();
+    const info = await transport.sendMail({ ...message, date });
+    const messageId = info.messageId ?? '';
+
+    try {
+      const raw = await new MailComposer({ ...message, date, messageId }).compile().build();
+      const path = await this.imapService.appendToSent(accountName, raw);
+      // A null path means the copy was skipped on purpose — the server files
+      // sent mail itself, or the account opted out. Not a missing copy.
+      return {
+        messageId,
+        status: 'sent',
+        sentCopy: path === null ? { kind: 'skipped' } : { kind: 'filed', path },
+      };
+    } catch (err) {
+      // The message is already delivered to SMTP. Throwing here would report a
+      // send that happened as a failure, so report the missing copy instead —
+      // silence is what made sent mail untraceable in the first place.
+      return {
+        messageId,
+        status: 'sent',
+        sentCopy: { kind: 'failed', error: err instanceof Error ? err.message : String(err) },
+      };
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -184,7 +207,11 @@ export default class SmtpService {
   // Send draft
   // -------------------------------------------------------------------------
 
-  async sendDraft(accountName: string, draftId: number, mailbox?: string): Promise<SendResult> {
+  async sendDraft(
+    accountName: string,
+    draftId: number,
+    mailbox?: string,
+  ): Promise<SendResult & { draft: 'removed' | 'kept' }> {
     this.checkRateLimit(accountName);
 
     // Fetch the draft via IMAP
@@ -195,12 +222,11 @@ export default class SmtpService {
     );
 
     const account = this.connections.getAccount(accountName);
-    const transport = await this.connections.getSmtpTransport(accountName);
 
     const to = draft.to.map((a) => a.address).join(', ');
     const cc = draft.cc?.map((a) => a.address).join(', ');
 
-    const result = await transport.sendMail({
+    const result = await this.dispatch(accountName, {
       from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
       to,
       cc,
@@ -210,12 +236,15 @@ export default class SmtpService {
       ...(draft.bodyHtml ? { html: draft.bodyHtml } : { text: draft.bodyText ?? '' }),
     });
 
-    // Delete the draft after successful send
+    // With no copy in Sent, this draft is the last copy of the message — deleting
+    // it is how sending a draft used to destroy it outright. A copy skipped on
+    // purpose is not that case: the server filed it, or the account opted out.
+    if (result.sentCopy.kind === 'failed') {
+      return { ...result, draft: 'kept' };
+    }
+
     await this.imapService.deleteDraft(accountName, draftId, draftsPath);
 
-    return {
-      messageId: result.messageId ?? '',
-      status: 'sent',
-    };
+    return { ...result, draft: 'removed' };
   }
 }
