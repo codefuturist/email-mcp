@@ -6,26 +6,62 @@
  * truncated off a 4-byte boundary, or a quoted-printable escape sliced in half.
  */
 
-/** Bytes fetched per message for the preview. Raw, before decoding. */
-export const PREVIEW_PART_BYTES = 600;
+/**
+ * Bytes fetched per message for the preview, before decoding.
+ *
+ * Measured against 80 live messages: plain text is usable from 600 bytes, but
+ * HTML mail spends its opening kilobyte on head boilerplate — usable previews
+ * go from 11/27 at 600 bytes to 25/27 at 1500, and gain nothing beyond that.
+ */
+export const PREVIEW_PART_BYTES = 1500;
+
+/**
+ * Markup in a part the sender declared as text/plain. Bulk senders do this
+ * often enough that trusting the declared type leaves CSS in the preview.
+ */
+const LOOKS_LIKE_MARKUP = /<(?:html|body|div|table|style|head|meta|span|p|br)\b/i;
+
+/**
+ * Below this many characters, a preview built from markup is residue rather
+ * than content. Plain text is exempt: a short message is still worth showing.
+ */
+const MIN_MARKUP_PREVIEW = 20;
 
 /** Characters kept in the finished preview. */
 export const PREVIEW_LENGTH = 200;
 
 /** Strip tags and decode the handful of entities that survive tag removal. */
 export function stripHtml(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    html
+      .replace(/<!DOCTYPE[^>]*>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      // Outlook conditional comments are routinely cut off unterminated.
+      .replace(/<!--[\s\S]*$/, ' ')
+      // The head of an HTML mail is meta and link tags — never content.
+      .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      // A truncated fetch can end inside a style, script or head block, leaving
+      // no closing tag for the rules above to match.
+      .replace(/<(?:style|script|head)\b[\s\S]*$/i, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      // …and can equally end inside an ordinary tag, which would otherwise
+      // survive tag removal and show up as "<meta name=" in the preview.
+      .replace(/<[^>]*$/, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)))
+      .replace(/\s+/g, ' ')
+      // Every tag becomes a space, so "<b>word</b>," would read "word ,".
+      .replace(/ +([,.;:!?)\]])/g, '$1')
+      .trim()
+  );
 }
 
 /** Decode quoted-printable, discarding an escape the truncation cut in half. */
@@ -141,16 +177,17 @@ export function findPreviewPart(bodyStructure: unknown): PreviewPart | undefined
 /** Decode a fetched part into a one-line preview, or undefined if it is empty. */
 export function buildPreview(raw: Buffer, part: PreviewPart): string | undefined {
   const decoded = decodeCharset(decodeTransferEncoding(raw, part.encoding), part.charset);
-  const text = (
-    part.type === 'text/html' ? stripHtml(decoded) : decoded.replace(/\s+/g, ' ').trim()
-  )
+  // Trust the content over the declared type: a text/plain part carrying markup
+  // would otherwise put raw CSS in the preview.
+  const isMarkup = part.type === 'text/html' || LOOKS_LIKE_MARKUP.test(decoded);
+  const text = (isMarkup ? stripHtml(decoded) : decoded.replace(/\s+/g, ' ').trim())
     // The fetch can end mid-character: a complete "=C3" escape is still an
     // incomplete UTF-8 sequence, which decodes to U+FFFD. That is truncation
     // damage, not content.
     .replace(/\uFFFD+\s*$/, '')
     .trimEnd();
 
-  if (text.length === 0) {
+  if (text.length < (isMarkup ? MIN_MARKUP_PREVIEW : 1)) {
     return undefined;
   }
   return text.length > PREVIEW_LENGTH ? `${text.slice(0, PREVIEW_LENGTH).trimEnd()}…` : text;

@@ -113,6 +113,27 @@ describe('stripHtml', () => {
   it('decodes the entities that survive tag removal', () => {
     expect(stripHtml('<p>a&nbsp;&amp;&nbsp;b</p>')).toBe('a & b');
   });
+
+  it('drops the head, which is never content', () => {
+    const doc =
+      '<!DOCTYPE html><html><head><meta charset="utf-8"><title>x</title></head><body>Real text</body></html>';
+
+    expect(stripHtml(doc)).toBe('Real text');
+  });
+
+  // A fetch that stops at a byte count routinely ends inside a tag. Without
+  // this, the preview reads "<meta name=" instead of the message.
+  it('drops a tag the fetch cut in half', () => {
+    expect(stripHtml('Body text <meta name="viewport" content="width=device-')).toBe('Body text');
+  });
+
+  it('drops a style block the fetch cut in half', () => {
+    expect(stripHtml('<p>Body</p><style>.a{color:red;} .b{margin:0')).toBe('Body');
+  });
+
+  it('does not leave a space before punctuation where a tag was', () => {
+    expect(stripHtml('<p>Hello <b>there</b>, and <i>you</i>.</p>')).toBe('Hello there, and you.');
+  });
 });
 
 describe('findPreviewPart', () => {
@@ -194,10 +215,53 @@ describe('buildPreview', () => {
     expect(buildPreview(Buffer.from('Hello\r\n\r\n  there'), plain)).toBe('Hello there');
   });
 
-  it('strips markup when only an HTML part exists', () => {
-    const html = { key: '1', type: 'text/html', encoding: '8bit', charset: 'utf-8' };
+  const html = { key: '1', type: 'text/html', encoding: '8bit', charset: 'utf-8' };
 
-    expect(buildPreview(Buffer.from('<p>Hello <b>there</b></p>'), html)).toBe('Hello there');
+  it('strips markup when only an HTML part exists', () => {
+    const body = '<p>Hello <b>there</b>, this is the actual message body.</p>';
+
+    expect(buildPreview(Buffer.from(body), html)).toBe(
+      'Hello there, this is the actual message body.',
+    );
+  });
+
+  // The opening kilobyte of an HTML mail is head boilerplate. Stripping it can
+  // leave a few stray characters, which is worse than showing nothing.
+  it('returns undefined when markup yields only residue', () => {
+    const boilerplate = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
+
+    expect(buildPreview(Buffer.from(boilerplate), html)).toBeUndefined();
+  });
+
+  // Bulk senders routinely put markup in the part they declare as text/plain.
+  it('strips markup from a part the sender mislabelled as text/plain', () => {
+    const body = '<style>html{margin:0}</style><div>The actual message text goes here.</div>';
+
+    expect(buildPreview(Buffer.from(body), plain)).toBe('The actual message text goes here.');
+  });
+
+  it('decodes numeric entities', () => {
+    const body = '<p>caf&#233; and 5&#x26;6, a message long enough to keep</p>';
+
+    expect(buildPreview(Buffer.from(body), html)).toBe(
+      'café and 5&6, a message long enough to keep',
+    );
+  });
+
+  it('drops an unterminated Outlook conditional comment', () => {
+    const body = '<p>Real message content here</p><!--[if mso]><table';
+
+    expect(buildPreview(Buffer.from(body), html)).toBe('Real message content here');
+  });
+
+  it('leaves angle-bracket URLs alone in genuine plain text', () => {
+    const body = 'See the site <http://example.com/page> for the details.';
+
+    expect(buildPreview(Buffer.from(body), plain)).toBe(body);
+  });
+
+  it('still shows a genuinely short plain-text message', () => {
+    expect(buildPreview(Buffer.from('Ok, thanks'), plain)).toBe('Ok, thanks');
   });
 
   it('truncates with an ellipsis and no dangling space', () => {
