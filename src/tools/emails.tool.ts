@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 import type ImapService from '../services/imap.service.js';
 import type { Email, EmailMeta } from '../types/index.js';
-import { classifyBulk } from '../utils/bulk-headers.js';
+import { formatBulk } from '../utils/bulk-headers.js';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -17,18 +17,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-/**
- * Renders the bulk-mail signal, or an empty string for personal mail.
- * Compact by design: it is repeated for every item of a listing.
- */
-function formatBulk(bulk: EmailMeta['bulk']): string {
-  if (!bulk) return '';
-  const marker = bulk.kind === 'newsletter' ? '📰 newsletter' : '🤖 automated';
-  const listId = bulk.listId ? ` (${bulk.listId})` : '';
-  const unsub = bulk.unsubscribe ? ` · unsub${bulk.oneClick ? ' 1-click' : ''}` : '';
-  return `${marker}${listId}${unsub}`;
 }
 
 function formatEmailMeta(email: EmailMeta): string {
@@ -46,7 +34,7 @@ function formatEmailMeta(email: EmailMeta): string {
   const bulk = formatBulk(email.bulk);
   const bulkStr = bulk ? `\n  ${bulk}` : '';
 
-  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${bulkStr}${email.preview ? `\n  ${email.preview}` : ''}`;
+  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${bulkStr}`;
 }
 
 /** Strips HTML markup and decodes common entities to produce readable plain text. */
@@ -255,7 +243,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
         parts.push(`Date:   ${email.date}`);
         parts.push(`ID:     ${email.messageId}`);
 
-        const bulk = formatBulk(classifyBulk(email.headers));
+        const bulk = formatBulk(email.bulk);
         if (bulk) {
           parts.push(`Bulk:   ${bulk}`);
         }
@@ -304,7 +292,8 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     'Fetch the full content of multiple emails in a single call (max 20). ' +
       'More efficient than calling get_email repeatedly when triaging or summarising several emails. ' +
       'Does NOT mark emails as seen. ' +
-      'Defaults to format="text" (HTML stripped) for compact, AI-friendly output.',
+      'Defaults to format="text" (HTML stripped) for compact, AI-friendly output. ' +
+      'Each message carries the same 📰 newsletter / 🤖 automated marker as get_email.',
     {
       account: z.string().describe('Account name from list_accounts'),
       ids: z
@@ -352,6 +341,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
             email.attachments.length > 0
               ? `📎 ${email.attachments.map((a) => a.filename).join(', ')}`
               : '';
+          const bulkLine = formatBulk(email.bulk);
 
           results.push(
             [
@@ -359,6 +349,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
               `Status: ${formatEmailStatus(email)}`,
               `From:   ${from}`,
               `Date:   ${email.date}`,
+              bulkLine ? `Bulk:   ${bulkLine}` : '',
               attachLine,
               '',
               body,

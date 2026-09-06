@@ -112,20 +112,6 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
   // Extract non-system flags as labels (IMAP keywords)
   const labels = [...flags].filter((f) => !f.startsWith('\\'));
 
-  // Extract preview from source buffer
-  let preview: string | undefined;
-  if (msg.source && Buffer.isBuffer(msg.source)) {
-    const rawText = msg.source.toString('utf-8');
-    // Try to extract body text after the header blank line
-    const bodyStart = rawText.indexOf('\r\n\r\n');
-    if (bodyStart >= 0) {
-      preview = rawText
-        .slice(bodyStart + 4, bodyStart + 204)
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-  }
-
   // BODY.PEEK[HEADER.FIELDS (...)] comes back as a raw buffer.
   const bulk =
     msg.headers && Buffer.isBuffer(msg.headers)
@@ -145,7 +131,6 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
     answered: flags.has('\\Answered'),
     hasAttachments: hasAttachments(msg.bodyStructure),
     labels,
-    preview,
     bulk,
   };
 }
@@ -208,6 +193,10 @@ async function messageToEmail(
     references: headers.references?.split(/\s+/).filter(Boolean),
     attachments: extractAttachments(msg.bodyStructure),
     headers,
+    // Recomputed from the full header set rather than reusing meta.bulk, which
+    // a full fetch leaves unset — the targeted HEADER.FIELDS fetch only happens
+    // on listings.
+    bulk: classifyBulk(headers),
   };
 }
 
@@ -377,7 +366,6 @@ export default class ImapService {
           envelope: true,
           flags: true,
           bodyStructure: true,
-          source: { start: 0, maxLength: 256 },
           headers: BULK_HEADER_FIELDS,
         },
         { uid: true },
@@ -604,7 +592,6 @@ export default class ImapService {
           envelope: true,
           flags: true,
           bodyStructure: true,
-          source: { start: 0, maxLength: 256 },
           headers: BULK_HEADER_FIELDS,
         },
         { uid: true },

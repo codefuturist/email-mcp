@@ -29,7 +29,9 @@ export default function registerActionsPrompt(server: McpServer): void {
 
 Follow these steps:
 1. Call list_emails with account="${account}", mailbox="${mailbox}", pageSize=${limitNum} to get recent emails.
-2. For each email that looks like it might contain action items (based on subject/preview), call get_email to read the full content.
+2. For each email that looks like it might contain action items (based on subject and sender),
+   call get_email to read the full content. Emails marked 📰 newsletter or 🤖 automated rarely
+   carry action items — skip them unless the subject clearly suggests otherwise.
 3. Extract ALL actionable items from the emails.
 
 Look for:

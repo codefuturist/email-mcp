@@ -1,4 +1,4 @@
-import { classifyBulk, parseHeaderBlock } from './bulk-headers.js';
+import { classifyBulk, formatBulk, parseHeaderBlock } from './bulk-headers.js';
 
 describe('parseHeaderBlock', () => {
   it('parses simple headers with lowercased keys', () => {
@@ -99,5 +99,36 @@ describe('classifyBulk', () => {
     });
 
     expect(signal?.kind).toBe('newsletter');
+  });
+});
+
+describe('formatBulk', () => {
+  it('renders nothing for personal mail', () => {
+    expect(formatBulk(undefined)).toBe('');
+  });
+
+  it('renders a bare newsletter marker', () => {
+    expect(formatBulk({ kind: 'newsletter', oneClick: false })).toBe('📰 newsletter');
+  });
+
+  it('includes the list id and unsubscribe availability', () => {
+    expect(
+      formatBulk({
+        kind: 'newsletter',
+        listId: 'news.example.com',
+        unsubscribe: 'https://example.com/u/abc',
+        oneClick: true,
+      }),
+    ).toBe('📰 newsletter (news.example.com) · unsub 1-click');
+  });
+
+  it('omits the 1-click hint when RFC 8058 is not supported', () => {
+    expect(
+      formatBulk({ kind: 'newsletter', unsubscribe: 'mailto:u@example.com', oneClick: false }),
+    ).toBe('📰 newsletter · unsub');
+  });
+
+  it('renders the automated marker', () => {
+    expect(formatBulk({ kind: 'automated', oneClick: false })).toBe('🤖 automated');
   });
 });

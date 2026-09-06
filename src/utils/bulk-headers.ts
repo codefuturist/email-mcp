@@ -115,3 +115,17 @@ export function classifyBulk(headers: Record<string, string>): BulkSignal | unde
     oneClick: headers['list-unsubscribe-post'] !== undefined,
   };
 }
+
+/**
+ * Render a bulk signal as one compact line, or an empty string for personal
+ * mail. Compact by design: it repeats for every item of a listing.
+ */
+export function formatBulk(bulk: BulkSignal | undefined): string {
+  if (!bulk) {
+    return '';
+  }
+  const marker = bulk.kind === 'newsletter' ? '📰 newsletter' : '🤖 automated';
+  const listId = bulk.listId ? ` (${bulk.listId})` : '';
+  const unsubscribe = bulk.unsubscribe ? ` · unsub${bulk.oneClick ? ' 1-click' : ''}` : '';
+  return `${marker}${listId}${unsubscribe}`;
+}

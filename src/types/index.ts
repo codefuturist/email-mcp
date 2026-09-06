@@ -187,7 +187,6 @@ export interface EmailMeta {
   answered: boolean;
   hasAttachments: boolean;
   labels: string[];
-  preview?: string;
   /** Set only for list or machine-generated mail; absent for personal mail. */
   bulk?: BulkSignal;
 }
