@@ -14,7 +14,7 @@ export default function registerContactsTools(server: McpServer, imapService: Im
     {
       account: z.string().describe('Account name from list_accounts'),
       mailbox: z.string().optional().describe('Mailbox to scan (default: INBOX)'),
-      limit: z
+      limit: z.coerce
         .number()
         .int()
         .min(1)
