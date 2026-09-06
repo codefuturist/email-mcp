@@ -229,10 +229,6 @@ describe('SmtpService', () => {
     });
   });
 
-  // -----------------------------------------------------------------------
-  // The draft is the last copy when the Sent copy failed
-  // -----------------------------------------------------------------------
-
   describe('send_draft and the last remaining copy', () => {
     function mockDraft() {
       const imap = imapService as unknown as {
