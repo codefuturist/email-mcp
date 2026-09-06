@@ -228,4 +228,56 @@ describe('SmtpService', () => {
       expect(imap.appendToSent).toHaveBeenCalledTimes(3);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // The draft is the last copy when the Sent copy failed
+  // -----------------------------------------------------------------------
+
+  describe('send_draft and the last remaining copy', () => {
+    function mockDraft() {
+      const imap = imapService as unknown as {
+        appendToSent: ReturnType<typeof vi.fn>;
+        fetchDraft: ReturnType<typeof vi.fn>;
+        deleteDraft: ReturnType<typeof vi.fn>;
+      };
+      imap.fetchDraft = vi.fn().mockResolvedValue({
+        email: { to: [{ address: 'recipient@example.com' }], subject: 'D', bodyText: 'b' },
+        mailbox: 'INBOX.Drafts',
+      });
+      imap.deleteDraft = vi.fn().mockResolvedValue(undefined);
+      return imap;
+    }
+
+    it('removes the draft once the copy is filed', async () => {
+      const imap = mockDraft();
+
+      const result = await service.sendDraft('test', 1);
+
+      expect(imap.deleteDraft).toHaveBeenCalledOnce();
+      expect(result.draft).toBe('removed');
+    });
+
+    // Without the copy there is nothing left but the draft. Deleting it here is
+    // how sending a draft used to destroy the message outright.
+    it('keeps the draft when the Sent copy failed', async () => {
+      const imap = mockDraft();
+      imap.appendToSent.mockRejectedValue(new Error('NO [TRYCREATE] Mailbox does not exist'));
+
+      const result = await service.sendDraft('test', 1);
+
+      expect(imap.deleteDraft).not.toHaveBeenCalled();
+      expect(result.draft).toBe('kept');
+      expect(result.sentCopy.kind).toBe('failed');
+    });
+
+    it('removes the draft when the copy was skipped on purpose', async () => {
+      const imap = mockDraft();
+      imap.appendToSent.mockResolvedValue(null);
+
+      const result = await service.sendDraft('test', 1);
+
+      expect(imap.deleteDraft).toHaveBeenCalledOnce();
+      expect(result.draft).toBe('removed');
+    });
+  });
 });

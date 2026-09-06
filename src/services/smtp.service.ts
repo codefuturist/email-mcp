@@ -207,7 +207,11 @@ export default class SmtpService {
   // Send draft
   // -------------------------------------------------------------------------
 
-  async sendDraft(accountName: string, draftId: number, mailbox?: string): Promise<SendResult> {
+  async sendDraft(
+    accountName: string,
+    draftId: number,
+    mailbox?: string,
+  ): Promise<SendResult & { draft: 'removed' | 'kept' }> {
     this.checkRateLimit(accountName);
 
     // Fetch the draft via IMAP
@@ -232,9 +236,15 @@ export default class SmtpService {
       ...(draft.bodyHtml ? { html: draft.bodyHtml } : { text: draft.bodyText ?? '' }),
     });
 
-    // Delete the draft after successful send
+    // With no copy in Sent, this draft is the last copy of the message — deleting
+    // it is how sending a draft used to destroy it outright. A copy skipped on
+    // purpose is not that case: the server filed it, or the account opted out.
+    if (result.sentCopy.kind === 'failed') {
+      return { ...result, draft: 'kept' };
+    }
+
     await this.imapService.deleteDraft(accountName, draftId, draftsPath);
 
-    return result;
+    return { ...result, draft: 'removed' };
   }
 }

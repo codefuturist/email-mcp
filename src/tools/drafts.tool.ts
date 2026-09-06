@@ -94,7 +94,11 @@ export default function registerDraftTools(
           content: [
             {
               type: 'text' as const,
-              text: `✅ Draft sent (Message-ID: ${result.messageId}). Draft removed from folder.${sentCopyNote(result)}`,
+              text: `✅ Draft sent (Message-ID: ${result.messageId}). ${
+                result.draft === 'removed'
+                  ? 'Draft removed from folder.'
+                  : 'Draft kept in folder — it is the last copy of this message.'
+              }${sentCopyNote(result)}`,
             },
           ],
         };
