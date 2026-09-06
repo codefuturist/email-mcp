@@ -650,18 +650,39 @@ Features:
 |------|-------------|
 | `list_accounts` | List all configured email accounts |
 | `list_mailboxes` | List folders with unread counts and special-use flags |
-| `list_emails` | Paginated email listing with date, sender, subject, and flag filters |
-| `get_email` | Read full email content with attachment metadata |
-| `get_emails` | Fetch full content of multiple emails in a single call (max 20) |
+| `list_emails` | Paginated email listing with date, sender, subject, and flag filters; marks bulk mail |
+| `get_email` | Read full email content with attachment metadata and bulk-mail classification |
+| `get_emails` | Fetch full content of multiple emails in a single call (max 20); same bulk markers |
 | `get_email_status` | Get read/flag/label state of an email without fetching the body |
-| `search_emails` | Search by keyword across subject, sender, and body |
+| `search_emails` | Search by keyword across subject, sender, and body; same bulk markers as `list_emails` |
 | `download_attachment` | Download an email attachment by filename |
 | `find_email_folder` | Discover the real folder(s) an email resides in (resolves virtual folders) |
 | `extract_contacts` | Extract unique contacts from recent email headers |
-| `get_thread` | Reconstruct a conversation thread via References/In-Reply-To |
+| `get_thread` | Reconstruct a conversation thread via References/In-Reply-To; same bulk markers |
 | `list_templates` | List available email templates |
 | `get_email_stats` | Email analytics — volume, top senders, daily trends |
 | `check_health` | Connection health, latency, quota, and IMAP capabilities |
+
+#### Bulk-mail classification
+
+`list_emails`, `search_emails`, `get_email`, `get_emails` and `get_thread` mark
+list and machine-generated mail, so an inbox can be triaged without reading
+bodies:
+
+| Marker | Meaning | Derived from |
+|--------|---------|--------------|
+| 📰 `newsletter` | Mailing list or subscription | `List-Unsubscribe` (RFC 2369), `List-Id` (RFC 2919), `Precedence: list` |
+| 🤖 `automated` | Machine-generated notification | `Auto-Submitted` (RFC 3834), `Precedence: bulk`/`junk` |
+| _(none)_ | Ordinary person-to-person mail | no bulk headers present |
+
+A newsletter also reports its unsubscribe URI when the sender offers one, and
+flags `1-click` when RFC 8058 one-click unsubscribe is supported. The headers
+are requested as part of the listing fetch, so classifying a whole page costs no
+extra round trip.
+
+Classification is header-derived and therefore deterministic — no model call and
+no heuristics on subject text. A sender that omits the headers is reported as
+personal mail rather than guessed at.
 
 #### Write (9)
 

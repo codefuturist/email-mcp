@@ -32,7 +32,10 @@ export default function registerTriagePrompt(server: McpServer): void {
 
 Follow these steps:
 1. Call list_emails with account="${account}", mailbox="${mailbox}", seen=false, pageSize=${limitNum} to get unread emails.
-2. For each email, read the subject, sender, and preview to classify it into ONE of these categories:
+2. For each email, read the subject and sender to classify it into ONE of these categories.
+   Trust the 📰 newsletter / 🤖 automated marker when present — it is derived from the
+   message's own RFC headers, so it is authoritative and needs no second-guessing.
+   Mail with no marker is person-to-person.
    🔴 **Urgent** — Requires immediate attention (time-sensitive, from important contacts, contains deadlines)
    🟡 **Needs Response** — Requires a reply but not time-critical
    🔵 **FYI** — Informational, no action needed (newsletters, notifications, CC'd emails)
