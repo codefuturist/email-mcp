@@ -358,6 +358,38 @@ host = "smtp.example.com"
   // configExists
   // -------------------------------------------------------------------------
 
+  describe('saveConfig permissions', () => {
+    it('writes the config file readable only by its owner', async () => {
+      const configPath = path.join(tmpDir, 'perms', 'config.toml');
+
+      await saveConfig({ settings: {}, accounts: [] } as never, configPath);
+
+      const mode = (await fs.stat(configPath)).mode.toString(8).slice(-3);
+      expect(mode).toBe('600');
+    });
+
+    it('creates the config directory readable only by its owner', async () => {
+      const dir = path.join(tmpDir, 'perms-dir');
+
+      await saveConfig({ settings: {}, accounts: [] } as never, path.join(dir, 'config.toml'));
+
+      const mode = (await fs.stat(dir)).mode.toString(8).slice(-3);
+      expect(mode).toBe('700');
+    });
+
+    // mode on writeFile applies only at creation, so an existing config with
+    // looser permissions — the case that actually leaks — needs chmod.
+    it('tightens an existing config that was left world-readable', async () => {
+      const configPath = path.join(tmpDir, 'loose.toml');
+      await fs.writeFile(configPath, '', 'utf-8');
+      await fs.chmod(configPath, 0o644);
+
+      await saveConfig({ settings: {}, accounts: [] } as never, configPath);
+
+      expect((await fs.stat(configPath)).mode.toString(8).slice(-3)).toBe('600');
+    });
+  });
+
   describe('configExists', () => {
     it('returns true for existing file', async () => {
       const configPath = path.join(tmpDir, 'config.toml');

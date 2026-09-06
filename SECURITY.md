@@ -19,6 +19,7 @@ You should receive a response within 48 hours. If the issue is confirmed, a fix 
 email-mcp handles sensitive email credentials and message content. The project includes several security measures:
 
 - **No credential storage** — passwords and tokens are read from your local config file or environment variables at runtime
+- **Config written owner-only** — `saveConfig` creates the config directory `0700` and the file `0600`, and tightens an existing file that was left more permissive
 - **Passwords need not be stored at all** — `password_command` resolves an account password by running an external command (a password manager CLI, the macOS Keychain) at startup, so no secret is written to `config.toml`
 - **Audit logging** — all write operations are logged with automatic redaction of sensitive fields (passwords, email body content)
 - **Rate limiting** — configurable rate limits on send operations (default: 10/minute)

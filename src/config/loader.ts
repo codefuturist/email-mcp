@@ -305,9 +305,13 @@ export async function saveConfig(
   filePath: string = CONFIG_FILE,
 ): Promise<void> {
   const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const toml = stringifyTOML(config as Record<string, unknown>);
-  await fs.writeFile(filePath, toml, 'utf-8');
+  await fs.writeFile(filePath, toml, { encoding: 'utf-8', mode: 0o600 });
+  // `mode` above only applies when the file is created, and is masked by umask.
+  // chmod also tightens a config that already exists with looser permissions —
+  // which is the case that matters, since that file may hold a password.
+  await fs.chmod(filePath, 0o600);
 }
 
 /**
