@@ -11,6 +11,7 @@ interface SeedEmailOptions {
   bcc?: string[];
   inReplyTo?: string;
   references?: string[];
+  headers?: Record<string, string>;
   attachments?: {
     filename: string;
     content: string | Buffer;
@@ -44,6 +45,7 @@ export async function seedEmail(options: SeedEmailOptions = {}) {
       bcc: options.bcc?.join(', '),
       inReplyTo: options.inReplyTo,
       references: options.references?.join(' '),
+      headers: options.headers,
       attachments: options.attachments,
     });
     return info.messageId;

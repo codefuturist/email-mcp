@@ -15,6 +15,7 @@ import type {
   Email,
   EmailAddress,
   EmailMeta,
+  EmailSecurityInfo,
   EmailStats,
   LabelInfo,
   Mailbox,
@@ -22,6 +23,7 @@ import type {
   QuotaInfo,
   SenderStat,
 } from '../types/index.js';
+import { BULK_HEADER_FIELDS, classifyBulk, parseHeaderBlock } from '../utils/bulk-headers.js';
 import type { LabelStrategy } from './label-strategy.js';
 import { detectLabelStrategy } from './label-strategy.js';
 
@@ -39,6 +41,28 @@ function parseAddress(addr: { name?: string; address?: string } | undefined): Em
 function parseAddresses(addrs: { name?: string; address?: string }[] | undefined): EmailAddress[] {
   if (!addrs) return [];
   return addrs.map(parseAddress);
+}
+
+function addressDomain(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const angle = /<\s*([^<>\s]+@[^<>\s]+)\s*>/.exec(value);
+  const plain = /([A-Z0-9._%+-]+@([A-Z0-9.-]+))/i.exec(angle?.[1] ?? value);
+  return plain?.[2]?.replace(/[>;,]+$/, '').toLowerCase();
+}
+
+function authStatuses(value: string | undefined, method: 'spf' | 'dkim' | 'dmarc'): string[] {
+  if (!value) return [];
+  const pattern = new RegExp(`(?:^|[;\\s])${method}\\s*=\\s*([a-z][a-z0-9_-]*)`, 'gi');
+  return [...new Set([...value.matchAll(pattern)].map((match) => match[1].toLowerCase()))];
+}
+
+/** Domains that signed the message, from both the DKIM header and the verifier's report. */
+function dkimSigningDomains(authenticationResults: string, dkimSignature: string): string[] {
+  const clean = (value: string) => value.replace(/[<>;,]+$/g, '').toLowerCase();
+  const fromResults = [...authenticationResults.matchAll(/\bheader\.d\s*=\s*([^;\s]+)/gi)];
+  const fromSignature = [...dkimSignature.matchAll(/(?:^|;)\s*d\s*=\s*([^;\s]+)/gi)];
+
+  return [...new Set([...fromResults, ...fromSignature].map((match) => clean(match[1])))];
 }
 
 function hasAttachments(bodyStructure: unknown): boolean {
@@ -111,19 +135,11 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
   // Extract non-system flags as labels (IMAP keywords)
   const labels = [...flags].filter((f) => !f.startsWith('\\'));
 
-  // Extract preview from source buffer
-  let preview: string | undefined;
-  if (msg.source && Buffer.isBuffer(msg.source)) {
-    const rawText = msg.source.toString('utf-8');
-    // Try to extract body text after the header blank line
-    const bodyStart = rawText.indexOf('\r\n\r\n');
-    if (bodyStart >= 0) {
-      preview = rawText
-        .slice(bodyStart + 4, bodyStart + 204)
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-  }
+  // BODY.PEEK[HEADER.FIELDS (...)] comes back as a raw buffer.
+  const bulk =
+    msg.headers && Buffer.isBuffer(msg.headers)
+      ? classifyBulk(parseHeaderBlock(msg.headers.toString('utf-8')))
+      : undefined;
 
   return {
     id: String(msg.uid ?? msg.seq),
@@ -138,7 +154,7 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
     answered: flags.has('\\Answered'),
     hasAttachments: hasAttachments(msg.bodyStructure),
     labels,
-    preview,
+    bulk,
   };
 }
 
@@ -159,16 +175,9 @@ async function messageToEmail(
     const raw = msg.source.toString('utf-8');
     const headerEnd = raw.indexOf('\r\n\r\n');
     if (headerEnd >= 0) {
-      // Parse headers
-      const headerSection = raw.slice(0, headerEnd);
-      headerSection.split('\r\n').forEach((line) => {
-        const colonIdx = line.indexOf(':');
-        if (colonIdx > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
-          const key = line.slice(0, colonIdx).trim().toLowerCase();
-          const value = line.slice(colonIdx + 1).trim();
-          headers[key] = value;
-        }
-      });
+      // parseHeaderBlock unfolds RFC 5322 continuation lines; naive line
+      // splitting truncates folded fields such as List-Unsubscribe.
+      Object.assign(headers, parseHeaderBlock(raw.slice(0, headerEnd)));
 
       const body = raw.slice(headerEnd + 4);
       // Simple content type detection
@@ -207,6 +216,10 @@ async function messageToEmail(
     references: headers.references?.split(/\s+/).filter(Boolean),
     attachments: extractAttachments(msg.bodyStructure),
     headers,
+    // Recomputed from the full header set rather than reusing meta.bulk, which
+    // a full fetch leaves unset — the targeted HEADER.FIELDS fetch only happens
+    // on listings.
+    bulk: classifyBulk(headers),
   };
 }
 
@@ -376,7 +389,7 @@ export default class ImapService {
           envelope: true,
           flags: true,
           bodyStructure: true,
-          source: { start: 0, maxLength: 256 },
+          headers: BULK_HEADER_FIELDS,
         },
         { uid: true },
       )) {
@@ -426,6 +439,59 @@ export default class ImapService {
       }
 
       return await messageToEmail(msg as unknown as Record<string, unknown>, client, uid);
+    } finally {
+      lock.release();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Get sender-authentication signals (lightweight — headers only, no body fetch)
+  // -------------------------------------------------------------------------
+
+  async getEmailSecurity(
+    accountName: string,
+    emailId: string,
+    mailbox = 'INBOX',
+  ): Promise<EmailSecurityInfo> {
+    const client = await this.connections.getImapClient(accountName);
+    const uid = parseInt(emailId, 10);
+    const safeMailbox = sanitizeMailboxName(mailbox);
+
+    const lock = await client.getMailboxLock(safeMailbox);
+    try {
+      const msg = await client.fetchOne(
+        String(uid),
+        { uid: true, envelope: true, headers: true },
+        { uid: true },
+      );
+
+      if (!msg) {
+        throw new Error(`Email ${emailId} not found in ${mailbox}`);
+      }
+
+      const headers =
+        msg.headers && Buffer.isBuffer(msg.headers)
+          ? parseHeaderBlock(msg.headers.toString('utf-8'))
+          : {};
+      const envelope = (msg.envelope ?? {}) as Record<string, unknown>;
+      const from = parseAddress((envelope.from as Record<string, string>[])?.[0]);
+      const authenticationResults = headers['authentication-results'] ?? '';
+      const receivedSpf = headers['received-spf'] ?? '';
+      const spf = new Set(authStatuses(authenticationResults, 'spf'));
+      const receivedSpfStatus = /^\s*([a-z][a-z0-9_-]*)/i.exec(receivedSpf)?.[1]?.toLowerCase();
+      if (receivedSpfStatus) spf.add(receivedSpfStatus);
+
+      return {
+        fromDomain: addressDomain(from.address),
+        returnPathDomain: addressDomain(headers['return-path']),
+        replyToDomain: addressDomain(headers['reply-to']),
+        spf: [...spf],
+        dkim: authStatuses(authenticationResults, 'dkim'),
+        dmarc: authStatuses(authenticationResults, 'dmarc'),
+        dkimDomains: dkimSigningDomains(authenticationResults, headers['dkim-signature'] ?? ''),
+        authenticationResultsPresent: Boolean(authenticationResults),
+        listUnsubscribe: Boolean(headers['list-unsubscribe']),
+      };
     } finally {
       lock.release();
     }
@@ -602,7 +668,7 @@ export default class ImapService {
           envelope: true,
           flags: true,
           bodyStructure: true,
-          source: { start: 0, maxLength: 256 },
+          headers: BULK_HEADER_FIELDS,
         },
         { uid: true },
       )) {
