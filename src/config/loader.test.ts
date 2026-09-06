@@ -35,6 +35,7 @@ describe('Config Loader', () => {
     for (const key of [
       'MCP_EMAIL_ADDRESS',
       'MCP_EMAIL_PASSWORD',
+      'MCP_EMAIL_PASSWORD_COMMAND',
       'MCP_EMAIL_IMAP_HOST',
       'MCP_EMAIL_SMTP_HOST',
       'MCP_EMAIL_READ_ONLY',
@@ -136,6 +137,133 @@ read_only = true
   });
 
   // -------------------------------------------------------------------------
+  // password_command
+  // -------------------------------------------------------------------------
+
+  // These use POSIX shell builtins (printf, echo, exit, true, 1>&2) rather
+  // than mocking node:child_process, so the parts worth covering — newline
+  // trimming, stdout/stderr separation, error shape — are actually exercised.
+  describe('password_command', () => {
+    async function loadWithAccountBody(body: string) {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(
+        configPath,
+        `
+[[accounts]]
+name = "test"
+email = "test@example.com"
+${body}
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+`,
+        'utf-8',
+      );
+      return loadConfig(configPath);
+    }
+
+    it('resolves the account password by running password_command', async () => {
+      const config = await loadWithAccountBody('password_command = "printf secret123"');
+
+      expect(config.accounts[0]?.password).toBe('secret123');
+    });
+
+    it('exposes the command on the account for diagnostics', async () => {
+      const config = await loadWithAccountBody('password_command = "printf secret123"');
+
+      expect(config.accounts[0]?.passwordCommand).toBe('printf secret123');
+    });
+
+    it('leaves passwordCommand unset for a plaintext account', async () => {
+      const config = await loadWithAccountBody('password = "secret"');
+
+      expect(config.accounts[0]?.passwordCommand).toBeUndefined();
+    });
+
+    it('trims trailing newline from command output', async () => {
+      const config = await loadWithAccountBody('password_command = "echo secret123"');
+
+      expect(config.accounts[0]?.password).toBe('secret123');
+    });
+
+    it('prefers password_command over an inline password', async () => {
+      const config = await loadWithAccountBody(
+        'password = "inline"\npassword_command = "printf from-command"',
+      );
+
+      expect(config.accounts[0]?.password).toBe('from-command');
+    });
+
+    it('resolves password_command for every account', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(
+        configPath,
+        `
+[[accounts]]
+name = "first"
+email = "first@example.com"
+password_command = "printf first-secret"
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+
+[[accounts]]
+name = "second"
+email = "second@example.com"
+password_command = "printf second-secret"
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+`,
+        'utf-8',
+      );
+
+      const config = await loadConfig(configPath);
+
+      expect(config.accounts[0]?.password).toBe('first-secret');
+      expect(config.accounts[1]?.password).toBe('second-secret');
+    });
+
+    it('names the failing account when password_command exits non-zero', async () => {
+      await expect(loadWithAccountBody('password_command = "exit 7"')).rejects.toThrow(
+        'password_command for account "test"',
+      );
+    });
+
+    it('does not leak command stdout into the error message', async () => {
+      const loading = loadWithAccountBody('password_command = "echo leaked-secret; exit 1"');
+
+      await expect(loading).rejects.toThrow('password_command for account "test"');
+      await expect(loading).rejects.toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining('leaked-secret') as unknown as string,
+        }),
+      );
+    });
+
+    it('includes command stderr in the failure message', async () => {
+      await expect(
+        loadWithAccountBody('password_command = "echo vault-is-locked 1>&2; exit 1"'),
+      ).rejects.toThrow('vault-is-locked');
+    });
+
+    it('throws when password_command produces no output', async () => {
+      await expect(loadWithAccountBody('password_command = "true"')).rejects.toThrow(
+        'produced no output',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // loadConfig from environment variables
   // -------------------------------------------------------------------------
 
@@ -152,6 +280,30 @@ read_only = true
       expect(config.accounts[0].email).toBe('env@example.com');
       expect(config.accounts[0].imap.host).toBe('imap.env.com');
       expect(config.accounts[0].smtp.host).toBe('smtp.env.com');
+    });
+
+    it('accepts MCP_EMAIL_PASSWORD_COMMAND instead of MCP_EMAIL_PASSWORD', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_PASSWORD_COMMAND = 'printf env-secret';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+
+      const config = await loadConfig(path.join(tmpDir, 'nonexistent.toml'));
+
+      expect(config.accounts[0].password).toBe('env-secret');
+      expect(config.accounts[0].passwordCommand).toBe('printf env-secret');
+    });
+
+    it('falls back to the config file when no credential env var is set', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.accounts[0].email).toBe('test@example.com');
     });
 
     it('reads read_only from MCP_EMAIL_READ_ONLY', async () => {
@@ -205,6 +357,38 @@ read_only = true
   // -------------------------------------------------------------------------
   // configExists
   // -------------------------------------------------------------------------
+
+  describe('saveConfig permissions', () => {
+    it('writes the config file readable only by its owner', async () => {
+      const configPath = path.join(tmpDir, 'perms', 'config.toml');
+
+      await saveConfig({ settings: {}, accounts: [] } as never, configPath);
+
+      const mode = (await fs.stat(configPath)).mode.toString(8).slice(-3);
+      expect(mode).toBe('600');
+    });
+
+    it('creates the config directory readable only by its owner', async () => {
+      const dir = path.join(tmpDir, 'perms-dir');
+
+      await saveConfig({ settings: {}, accounts: [] } as never, path.join(dir, 'config.toml'));
+
+      const mode = (await fs.stat(dir)).mode.toString(8).slice(-3);
+      expect(mode).toBe('700');
+    });
+
+    // mode on writeFile applies only at creation, so an existing config with
+    // looser permissions — the case that actually leaks — needs chmod.
+    it('tightens an existing config that was left world-readable', async () => {
+      const configPath = path.join(tmpDir, 'loose.toml');
+      await fs.writeFile(configPath, '', 'utf-8');
+      await fs.chmod(configPath, 0o644);
+
+      await saveConfig({ settings: {}, accounts: [] } as never, configPath);
+
+      expect((await fs.stat(configPath)).mode.toString(8).slice(-3)).toBe('600');
+    });
+  });
 
   describe('configExists', () => {
     it('returns true for existing file', async () => {

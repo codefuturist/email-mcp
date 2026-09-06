@@ -92,6 +92,37 @@ describe('AccountConfigSchema', () => {
     );
   });
 
+  it('accepts password_command instead of password', () => {
+    const result = AccountConfigSchema.parse(
+      validAccount({ password: undefined, password_command: 'printf secret123' }),
+    );
+    expect(result.password_command).toBe('printf secret123');
+    expect(result.password).toBeUndefined();
+  });
+
+  it('accepts both password and password_command', () => {
+    const result = AccountConfigSchema.parse(
+      validAccount({ password_command: 'printf secret123' }),
+    );
+    expect(result.password).toBe('secret');
+    expect(result.password_command).toBe('printf secret123');
+  });
+
+  it('rejects an empty password_command', () => {
+    expect(() =>
+      AccountConfigSchema.parse(validAccount({ password: undefined, password_command: '' })),
+    ).toThrow('password_command cannot be empty');
+  });
+
+  // Guards against "simplifying" the refine back into a ?? chain, which would
+  // short-circuit on the non-nullish empty string and reject a valid account.
+  it('accepts an empty password when password_command is set', () => {
+    const result = AccountConfigSchema.parse(
+      validAccount({ password: '', password_command: 'printf secret123' }),
+    );
+    expect(result.password_command).toBe('printf secret123');
+  });
+
   it('rejects missing name', () => {
     expect(() => AccountConfigSchema.parse(validAccount({ name: '' }))).toThrow();
   });

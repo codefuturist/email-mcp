@@ -79,7 +79,15 @@ async function showConfig(): Promise<void> {
           : 'disabled'
       }`,
     );
-    console.log(`  password = ${'•'.repeat(8)}\n`);
+    if (account.oauth2) {
+      console.log(`  auth     = oauth2 (${account.oauth2.provider})\n`);
+    } else if (account.passwordCommand) {
+      // The command is not a secret and seeing it is the whole debugging value.
+      console.log(`  auth     = password_command`);
+      console.log(`  command  = ${account.passwordCommand}\n`);
+    } else {
+      console.log(`  password = ${'•'.repeat(8)}\n`);
+    }
   });
 }
 

@@ -358,6 +358,8 @@ Commands:
 
 Located at `$XDG_CONFIG_HOME/email-mcp/config.toml` (default: `~/.config/email-mcp/config.toml`).
 
+Each account authenticates with exactly one of `password`, `password_command`, or an `[accounts.oauth2]` block.
+
 ```toml
 [settings]
 rate_limit = 10  # max emails per minute per account
@@ -385,6 +387,35 @@ enabled = true
 max_connections = 1
 max_messages = 100
 ```
+
+#### Resolving the password from a command
+
+Instead of `password`, set `password_command` to any shell command that prints the
+password to **stdout**. Trailing whitespace is trimmed. This keeps secrets in your
+password manager instead of in plaintext in `config.toml`.
+
+```toml
+[[accounts]]
+name = "personal"
+email = "you@gmail.com"
+
+# macOS Keychain
+password_command = "security find-generic-password -s email-mcp-personal -w"
+
+# Bitwarden CLI (requires an unlocked vault; BW_SESSION is inherited from the environment)
+# password_command = "bw get password personal-email"
+
+# 1Password CLI
+# password_command = "op read 'op://Private/personal-email/password'"
+```
+
+- The command runs **once at startup**, via `/bin/sh -c`, in parallel across accounts.
+- Your vault must already be unlocked. The command cannot prompt on stdin and is
+  killed after **10 seconds**.
+- The password must go to stdout. Anything the command writes to stderr may be
+  echoed back in error messages to help you debug, so do not print secrets there.
+- If both `password` and `password_command` are set, `password_command` wins.
+- Rotating the password requires restarting the server.
 
 #### OAuth2 _(experimental)_
 
@@ -425,7 +456,8 @@ For single-account setups (overrides config file):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MCP_EMAIL_ADDRESS` | *required* | Email address |
-| `MCP_EMAIL_PASSWORD` | *required* | Password or app password |
+| `MCP_EMAIL_PASSWORD` | *required*¹ | Password or app password |
+| `MCP_EMAIL_PASSWORD_COMMAND` | *required*¹ | Shell command printing the password to stdout (see [Resolving the password from a command](#resolving-the-password-from-a-command)) |
 | `MCP_EMAIL_IMAP_HOST` | *required* | IMAP server hostname |
 | `MCP_EMAIL_SMTP_HOST` | *required* | SMTP server hostname |
 | `MCP_EMAIL_ACCOUNT_NAME` | `default` | Account name |
@@ -441,6 +473,8 @@ For single-account setups (overrides config file):
 | `MCP_EMAIL_SMTP_POOL_MAX_CONNECTIONS` | `1` | Max pooled SMTP connections |
 | `MCP_EMAIL_SMTP_POOL_MAX_MESSAGES` | `100` | Max messages per pooled connection |
 | `MCP_EMAIL_RATE_LIMIT` | `10` | Max sends per minute |
+
+¹ One of `MCP_EMAIL_PASSWORD`, `MCP_EMAIL_PASSWORD_COMMAND`, or the OAuth2 variables is required.
 
 ### Email Scheduling
 

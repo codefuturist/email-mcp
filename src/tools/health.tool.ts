@@ -9,6 +9,14 @@ import { z } from 'zod';
 
 import type ConnectionManager from '../connections/manager.js';
 import type ImapService from '../services/imap.service.js';
+import type { AccountConfig } from '../types/index.js';
+
+/** How the account actually authenticates, as configured. */
+function authType(cfg: AccountConfig): 'oauth2' | 'password_command' | 'password' {
+  if (cfg.oauth2) return 'oauth2';
+  if (cfg.passwordCommand) return 'password_command';
+  return 'password';
+}
 
 export default function registerHealthTools(
   server: McpServer,
@@ -30,7 +38,7 @@ export default function registerHealthTools(
           const cfg = connections.getAccount(name);
           const result: Record<string, unknown> = {
             name,
-            auth_type: cfg.oauth2 ? 'oauth2' : 'password',
+            auth_type: authType(cfg),
           };
 
           // IMAP health
