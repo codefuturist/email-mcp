@@ -11,9 +11,11 @@
  */
 
 import { ImapFlow } from 'imapflow';
+import buildImapAuth from '../connections/auth.js';
 import { mcpLog } from '../logging.js';
 import type { AccountConfig, EmailMeta, WatcherConfig } from '../types/index.js';
 import eventBus from './event-bus.js';
+import type OAuthService from './oauth.service.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,9 +67,12 @@ export default class WatcherService {
 
   private accounts: AccountConfig[];
 
-  constructor(config: WatcherConfig, accounts: AccountConfig[]) {
+  private oauthService?: OAuthService;
+
+  constructor(config: WatcherConfig, accounts: AccountConfig[], oauthService?: OAuthService) {
     this.config = config;
     this.accounts = accounts;
+    this.oauthService = oauthService;
   }
 
   async start(): Promise<void> {
@@ -144,9 +149,7 @@ export default class WatcherService {
     if (!state || state.stopped) return;
 
     try {
-      const auth = state.account.oauth2
-        ? { user: state.account.username, accessToken: state.account.password }
-        : { user: state.account.username, pass: state.account.password };
+      const auth = await buildImapAuth(state.account, this.oauthService);
 
       const client = new ImapFlow({
         host: state.account.imap.host,

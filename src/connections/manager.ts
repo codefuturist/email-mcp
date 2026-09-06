@@ -14,6 +14,7 @@ import { mcpLog } from '../logging.js';
 
 import type OAuthService from '../services/oauth.service.js';
 import type { AccountConfig } from '../types/index.js';
+import buildImapAuth from './auth.js';
 import type { IConnectionManager } from './types.js';
 
 type SmtpAuth =
@@ -76,14 +77,7 @@ export default class ConnectionManager implements IConnectionManager {
 
     const account = this.getAccount(accountName);
 
-    // Build auth config based on auth type
-    let auth: { user: string; pass?: string; accessToken?: string };
-    if (account.oauth2 && this.oauthService) {
-      const accessToken = await this.oauthService.getAccessToken(account.oauth2);
-      auth = { user: account.username, accessToken };
-    } else {
-      auth = { user: account.username, pass: account.password };
-    }
+    const auth = await buildImapAuth(account, this.oauthService);
 
     const client = new ImapFlow({
       host: account.imap.host,
