@@ -26,20 +26,25 @@ async function sendMethodNames(): Promise<string[]> {
 
 async function callersMissingTheNote(methods: string[]): Promise<string[]> {
   const call = new RegExp(`\\.(${methods.join('|')})\\(`);
-  const missing: string[] = [];
 
-  for (const dir of SCANNED) {
-    const files = (await readdir(join(SRC_DIR, dir))).filter(
-      (file) => file.endsWith('.ts') && !file.endsWith('.test.ts') && file !== 'smtp.service.ts',
-    );
+  const perDir = await Promise.all(
+    SCANNED.map(async (dir) => {
+      const files = (await readdir(join(SRC_DIR, dir))).filter(
+        (file) => file.endsWith('.ts') && !file.endsWith('.test.ts') && file !== 'smtp.service.ts',
+      );
 
-    for (const file of files) {
-      const source = await readFile(join(SRC_DIR, dir, file), 'utf8');
-      if (call.test(source) && !source.includes('sentCopyNote(')) missing.push(file);
-    }
-  }
+      const checked = await Promise.all(
+        files.map(async (file) => {
+          const source = await readFile(join(SRC_DIR, dir, file), 'utf8');
+          return call.test(source) && !source.includes('sentCopyNote(') ? file : null;
+        }),
+      );
 
-  return missing;
+      return checked.filter((file): file is string => file !== null);
+    }),
+  );
+
+  return perDir.flat();
 }
 
 // Two of the six send paths shipped without the note and nothing noticed: the

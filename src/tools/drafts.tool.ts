@@ -77,7 +77,7 @@ export default function registerDraftTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'send_draft',
-    'Send an existing draft email and remove it from Drafts. The draft is fetched, sent via SMTP, then deleted. Use list_emails with the Drafts mailbox to find draft IDs.',
+    'Send an existing draft email and remove it from Drafts. The draft is fetched, sent via SMTP, then deleted — unless filing the copy in Sent failed, in which case the draft is kept because it is then the last copy of the message. Use list_emails with the Drafts mailbox to find draft IDs.',
     {
       account: z.string().describe('Account name from list_accounts'),
       id: z.number().int().describe('Draft email UID (from list_emails on Drafts mailbox)'),
