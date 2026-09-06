@@ -43,28 +43,10 @@ function parseAddresses(addrs: { name?: string; address?: string }[] | undefined
   return addrs.map(parseAddress);
 }
 
-function parseHeaderBuffer(buffer: Buffer): Record<string, string> {
-  const headers: Record<string, string> = {};
-  const unfolded = buffer.toString('utf-8').replace(/\r?\n[ \t]+/g, ' ');
-
-  for (const line of unfolded.split(/\r?\n/)) {
-    const colonIdx = line.indexOf(':');
-    if (colonIdx <= 0) continue;
-
-    const key = line.slice(0, colonIdx).trim().toLowerCase();
-    const value = line.slice(colonIdx + 1).trim();
-    if (!key || !value) continue;
-
-    headers[key] = headers[key] ? `${headers[key]}\n${value}` : value;
-  }
-
-  return headers;
-}
-
 function addressDomain(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const angle = /<\s*([^<>\s]+@[^<>\s]+)\s*>/.exec(value);
-  const plain = /([A-Z0-9._%+\-]+@([A-Z0-9.\-]+))/i.exec(angle?.[1] ?? value);
+  const plain = /([A-Z0-9._%+-]+@([A-Z0-9.-]+))/i.exec(angle?.[1] ?? value);
   return plain?.[2]?.replace(/[>;,]+$/, '').toLowerCase();
 }
 
@@ -74,15 +56,13 @@ function authStatuses(value: string | undefined, method: 'spf' | 'dkim' | 'dmarc
   return [...new Set([...value.matchAll(pattern)].map((match) => match[1].toLowerCase()))];
 }
 
+/** Domains that signed the message, from both the DKIM header and the verifier's report. */
 function dkimSigningDomains(authenticationResults: string, dkimSignature: string): string[] {
-  const domains = new Set<string>();
-  for (const match of authenticationResults.matchAll(/\bheader\.d\s*=\s*([^;\s]+)/gi)) {
-    domains.add(match[1].replace(/[<>;,]+$/g, '').toLowerCase());
-  }
-  for (const match of dkimSignature.matchAll(/(?:^|;)\s*d\s*=\s*([^;\s]+)/gi)) {
-    domains.add(match[1].replace(/[<>;,]+$/g, '').toLowerCase());
-  }
-  return [...domains];
+  const clean = (value: string) => value.replace(/[<>;,]+$/g, '').toLowerCase();
+  const fromResults = [...authenticationResults.matchAll(/\bheader\.d\s*=\s*([^;\s]+)/gi)];
+  const fromSignature = [...dkimSignature.matchAll(/(?:^|;)\s*d\s*=\s*([^;\s]+)/gi)];
+
+  return [...new Set([...fromResults, ...fromSignature].map((match) => clean(match[1])))];
 }
 
 function hasAttachments(bodyStructure: unknown): boolean {
@@ -490,7 +470,9 @@ export default class ImapService {
       }
 
       const headers =
-        msg.headers && Buffer.isBuffer(msg.headers) ? parseHeaderBuffer(msg.headers) : {};
+        msg.headers && Buffer.isBuffer(msg.headers)
+          ? parseHeaderBlock(msg.headers.toString('utf-8'))
+          : {};
       const envelope = (msg.envelope ?? {}) as Record<string, unknown>;
       const from = parseAddress((envelope.from as Record<string, string>[])?.[0]);
       const authenticationResults = headers['authentication-results'] ?? '';
@@ -506,10 +488,7 @@ export default class ImapService {
         spf: [...spf],
         dkim: authStatuses(authenticationResults, 'dkim'),
         dmarc: authStatuses(authenticationResults, 'dmarc'),
-        dkimDomains: dkimSigningDomains(
-          authenticationResults,
-          headers['dkim-signature'] ?? '',
-        ),
+        dkimDomains: dkimSigningDomains(authenticationResults, headers['dkim-signature'] ?? ''),
         authenticationResultsPresent: Boolean(authenticationResults),
         listUnsubscribe: Boolean(headers['list-unsubscribe']),
       };

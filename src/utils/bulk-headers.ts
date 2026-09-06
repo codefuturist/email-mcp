@@ -8,6 +8,8 @@
 
 import type { BulkKind, BulkSignal } from '../types/index.js';
 
+export { default as parseHeaderBlock } from './headers.js';
+
 /**
  * Header fields worth fetching for classification. Kept deliberately short:
  * every field here is pulled for every message in a listing.
@@ -30,38 +32,6 @@ const AUTOMATED_PRECEDENCE = new Set(['bulk', 'junk', 'auto_reply']);
  * carrying both an https and a mailto URI is common, and naive line splitting
  * silently truncates it.
  */
-export function parseHeaderBlock(raw: string): Record<string, string> {
-  const allLines = raw.split(/\r?\n/);
-  // A blank line ends the header block; everything after it is body.
-  const blankIndex = allLines.findIndex((line) => line.length === 0);
-  const lines = blankIndex >= 0 ? allLines.slice(0, blankIndex) : allLines;
-
-  // Unfold: a line starting with whitespace continues the field above it.
-  const fields = lines.reduce<string[]>((acc, line) => {
-    if (/^[ \t]/.test(line) && acc.length > 0) {
-      acc[acc.length - 1] = `${acc[acc.length - 1]} ${line.trim()}`.trim();
-    } else {
-      acc.push(line);
-    }
-    return acc;
-  }, []);
-
-  return Object.fromEntries(
-    fields
-      .map((line) => {
-        const colonIndex = line.indexOf(':');
-        if (colonIndex <= 0) {
-          return null;
-        }
-        return [
-          line.slice(0, colonIndex).trim().toLowerCase(),
-          line.slice(colonIndex + 1).trim(),
-        ] as const;
-      })
-      .filter((entry): entry is readonly [string, string] => entry !== null),
-  );
-}
-
 /** Pick the most actionable unsubscribe URI, preferring https over mailto. */
 function pickUnsubscribeUri(value: string): string | undefined {
   const uris = [...value.matchAll(/<([^>]+)>/g)].map((m) => m[1]?.trim()).filter(Boolean);

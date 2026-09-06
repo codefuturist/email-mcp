@@ -204,8 +204,9 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     async ({ account, emailId, mailbox }) => {
       try {
         const security = await imapService.getEmailSecurity(account, emailId, mailbox);
-        const renderStatuses = (values: string[]) =>
-          values.length > 0 ? values.join(', ') : 'not reported';
+        function renderStatuses(values: string[]): string {
+          return values.length > 0 ? values.join(', ') : 'not reported';
+        }
 
         const parts = [
           '🔐 Email security signals',
