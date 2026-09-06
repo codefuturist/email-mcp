@@ -66,6 +66,13 @@ count the items on page 1 and call it the answer.
 Reading is non-destructive by default: `get_email` uses `BODY.PEEK` and only
 marks a message read when you pass `markRead: true`.
 
+`list_emails` and `search_emails` take `preview: true` for ~200 characters of
+each body. Off by default because it costs 1500 extra bytes per message and
+lengthens the output — ask for it when the subject lines will not let the user
+decide, not as a habit. A message whose body reduces to markup residue gets no
+preview rather than a misleading one, so absence means "nothing readable there",
+not "empty message".
+
 ## Bulk-mail markers
 
 Listings and message reads mark list and machine-generated mail:

@@ -37,6 +37,9 @@ tidy inbox and an unanswered colleague is a worse outcome than stopping halfway.
 list_emails { "account": "perso", "mailbox": "INBOX", "seen": false, "pageSize": 100 }
 ```
 
+Add `"preview": true` when the subject lines alone will not let the user decide
+what to keep. It costs extra bytes per message, so ask for it deliberately.
+
 Sort what comes back into three piles and report the counts before touching
 anything:
 
