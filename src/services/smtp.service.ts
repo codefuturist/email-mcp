@@ -170,8 +170,14 @@ export default class SmtpService {
 
     try {
       const raw = await new MailComposer({ ...message, date, messageId }).compile().build();
-      const archivedTo = await this.imapService.appendToSent(accountName, raw);
-      return { messageId, status: 'sent', archivedTo };
+      const path = await this.imapService.appendToSent(accountName, raw);
+      // A null path means the copy was skipped on purpose — the server files
+      // sent mail itself, or the account opted out. Not a missing copy.
+      return {
+        messageId,
+        status: 'sent',
+        sentCopy: path === null ? { kind: 'skipped' } : { kind: 'filed', path },
+      };
     } catch (err) {
       // The message is already delivered to SMTP. Throwing here would report a
       // send that happened as a failure, so report the missing copy instead —
@@ -179,8 +185,7 @@ export default class SmtpService {
       return {
         messageId,
         status: 'sent',
-        archivedTo: null,
-        archiveError: err instanceof Error ? err.message : String(err),
+        sentCopy: { kind: 'failed', error: err instanceof Error ? err.message : String(err) },
       };
     }
   }
@@ -202,7 +207,11 @@ export default class SmtpService {
   // Send draft
   // -------------------------------------------------------------------------
 
-  async sendDraft(accountName: string, draftId: number, mailbox?: string): Promise<SendResult> {
+  async sendDraft(
+    accountName: string,
+    draftId: number,
+    mailbox?: string,
+  ): Promise<SendResult & { draft: 'removed' | 'kept' }> {
     this.checkRateLimit(accountName);
 
     // Fetch the draft via IMAP
@@ -227,9 +236,15 @@ export default class SmtpService {
       ...(draft.bodyHtml ? { html: draft.bodyHtml } : { text: draft.bodyText ?? '' }),
     });
 
-    // Delete the draft after successful send
+    // With no copy in Sent, this draft is the last copy of the message — deleting
+    // it is how sending a draft used to destroy it outright. A copy skipped on
+    // purpose is not that case: the server filed it, or the account opted out.
+    if (result.sentCopy.kind === 'failed') {
+      return { ...result, draft: 'kept' };
+    }
+
     await this.imapService.deleteDraft(accountName, draftId, draftsPath);
 
-    return result;
+    return { ...result, draft: 'removed' };
   }
 }

@@ -210,13 +210,27 @@ export interface Email extends EmailMeta {
 // Results
 // ---------------------------------------------------------------------------
 
+/**
+ * What happened to the copy of an outgoing message in the Sent folder.
+ *
+ * Three states, not two. A copy the server files itself is skipped on purpose,
+ * and reporting that as a missing copy is a lie on every Gmail send. Adding a
+ * fourth variant breaks `tsc` in each consumer that branches here — the union
+ * exists so the next state cannot arrive in silence the way this one did.
+ *
+ * `skipped` carries no reason: `ImapService.appendToSent` returns a bare null
+ * for both causes (server files it, or `save_to_sent = false`), and one neutral
+ * sentence is true of both.
+ */
+export type SentCopy =
+  | { kind: 'filed'; path: string }
+  | { kind: 'skipped' }
+  | { kind: 'failed'; error: string };
+
 export interface SendResult {
   messageId: string;
   status: 'sent' | 'failed';
-  /** Folder the Sent copy landed in, or null when filing it failed. */
-  archivedTo?: string | null;
-  /** Why the Sent copy could not be filed. Set only when archivedTo is null. */
-  archiveError?: string;
+  sentCopy: SentCopy;
 }
 
 export interface PaginatedResult<T> {
