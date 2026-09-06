@@ -93,7 +93,7 @@ async function runServer(): Promise<void> {
   const localCalendarService = new LocalCalendarService();
   const remindersService = new RemindersService();
   const schedulerService = new SchedulerService(smtpService, imapService);
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
+  const watcherService = new WatcherService(config.settings.watcher, config.accounts, oauthService);
   const hooksService = new HooksService(config.settings.hooks, imapService);
 
   const server = createServer();
@@ -207,7 +207,7 @@ async function runHttpServer(port: number): Promise<void> {
   const localCalendarService = new LocalCalendarService();
   const remindersService = new RemindersService();
   const schedulerService = new SchedulerService(smtpService, imapService);
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
+  const watcherService = new WatcherService(config.settings.watcher, config.accounts, oauthService);
   const hooksService = new HooksService(config.settings.hooks, imapService);
 
   // Per-session factory: tools share service instances but each MCP session
