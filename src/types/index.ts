@@ -72,6 +72,11 @@ export interface AccountConfig {
    * mailbox carrying several sent-shaped folders the guess picks the wrong one.
    */
   sentMailbox?: string;
+  /**
+   * File a copy of outgoing mail in the Sent folder. Defaults to true, except
+   * on servers that already file sent mail themselves — see appendToSent.
+   */
+  saveToSent?: boolean;
   imap: ImapConfig;
   smtp: SmtpConfig;
 }

@@ -368,6 +368,7 @@ email = "you@gmail.com"
 full_name = "Your Name"
 password = "your-app-password"
 # sent_mailbox = "INBOX.Sent Messages"   # optional, see below
+# save_to_sent = false                    # optional; skipped on Gmail by default
 
 [accounts.imap]
 host = "imap.gmail.com"
@@ -406,6 +407,16 @@ sent_mailbox = "INBOX.Sent Messages"
 
 Use the folder's full IMAP path, as `list_mailboxes` reports it. When the copy cannot be filed, the
 message is still sent and the tool result says where it failed.
+
+**Gmail files sent mail itself.** Messages sent through its SMTP land in Sent Mail without any
+`APPEND`, so filing another copy would give you every sent message twice. Gmail's IMAP server is
+recognised by its `X-GM-EXT-1` capability — a more reliable signal than the hostname — and the copy
+is skipped there by default. `save_to_sent` overrides the guess in either direction:
+
+```toml
+save_to_sent = true    # file a copy even on a server that appears to do it itself
+save_to_sent = false   # never file a copy, whatever the server does
+```
 
 #### OAuth2 _(experimental)_
 

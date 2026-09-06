@@ -19,6 +19,7 @@ function createMockImapClient() {
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
     append: vi.fn().mockResolvedValue({ uid: 7 }),
+    capabilities: new Set<string>(),
     _releaseFn: releaseFn,
   };
 }
@@ -218,6 +219,40 @@ describe('ImapService', () => {
       ]);
       // the override settles it, so there is nothing to look up
       expect(client.list).not.toHaveBeenCalled();
+    });
+
+    // Gmail files SMTP sends into Sent Mail itself; appending on top of that
+    // gives the user every sent message twice.
+    it('skips the copy on a server that files sent mail itself', async () => {
+      const gmailClient = createMockImapClient();
+      gmailClient.capabilities.add('X-GM-EXT-1');
+      const svc = new ImapService(createMockConnectionManager(gmailClient) as never);
+
+      const path = await svc.appendToSent('test', Buffer.from('raw'));
+
+      expect(path).toBeNull();
+      expect(gmailClient.append).not.toHaveBeenCalled();
+    });
+
+    it('files the copy anyway when the account asks for it explicitly', async () => {
+      const gmailClient = createMockImapClient();
+      gmailClient.capabilities.add('X-GM-EXT-1');
+      const manager = createMockConnectionManager(gmailClient);
+      manager.getAccount = vi.fn().mockReturnValue({ name: 'test', saveToSent: true });
+      const svc = new ImapService(manager as never);
+
+      expect(await svc.appendToSent('test', Buffer.from('raw'))).not.toBeNull();
+      expect(gmailClient.append).toHaveBeenCalledOnce();
+    });
+
+    it('honours save_to_sent = false on a server that does not file it', async () => {
+      const plainClient = createMockImapClient();
+      const manager = createMockConnectionManager(plainClient);
+      manager.getAccount = vi.fn().mockReturnValue({ name: 'test', saveToSent: false });
+      const svc = new ImapService(manager as never);
+
+      expect(await svc.appendToSent('test', Buffer.from('raw'))).toBeNull();
+      expect(plainClient.append).not.toHaveBeenCalled();
     });
 
     it('marks the copy read so it does not show up as unread mail', async () => {
