@@ -73,7 +73,7 @@ describe('SmtpService', () => {
       expect(result).toEqual({
         messageId: '<test@example.com>',
         status: 'sent',
-        archivedTo: 'INBOX.Sent',
+        sentCopy: { kind: 'filed', path: 'INBOX.Sent' },
       });
       expect(transport.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -144,8 +144,7 @@ describe('SmtpService', () => {
       });
 
       expect(imapService.appendToSent).toHaveBeenCalledOnce();
-      expect(result.archivedTo).toBe('INBOX.Sent');
-      expect(result.archiveError).toBeUndefined();
+      expect(result.sentCopy).toEqual({ kind: 'filed', path: 'INBOX.Sent' });
     });
 
     it('files a copy carrying the Message-ID that SMTP returned', async () => {
@@ -176,8 +175,25 @@ describe('SmtpService', () => {
 
       expect(result.status).toBe('sent');
       expect(result.messageId).toBe('<test@example.com>');
-      expect(result.archivedTo).toBeNull();
-      expect(result.archiveError).toContain('Mailbox does not exist');
+      expect(result.sentCopy).toEqual({
+        kind: 'failed',
+        error: expect.stringContaining('Mailbox does not exist'),
+      });
+    });
+
+    // The guard returns a bare null where the server files sent mail itself.
+    // Before the union that was indistinguishable from a copy that failed.
+    it('reports the copy as skipped when the server files it itself', async () => {
+      (imapService.appendToSent as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const result = await service.sendEmail('test', {
+        to: ['recipient@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(result.status).toBe('sent');
+      expect(result.sentCopy).toEqual({ kind: 'skipped' });
     });
 
     it('files a copy for replies, forwards and drafts too, not only plain sends', async () => {
