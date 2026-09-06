@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import type ImapService from '../services/imap.service.js';
 import type { Email, EmailMeta } from '../types/index.js';
+import { formatBulk } from '../utils/bulk-headers.js';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -30,8 +31,11 @@ function formatEmailMeta(email: EmailMeta): string {
 
   const from = email.from.name ? `${email.from.name} <${email.from.address}>` : email.from.address;
   const labelStr = email.labels.length > 0 ? `\n  🏷️ ${email.labels.join(', ')}` : '';
+  const bulk = formatBulk(email.bulk);
+  const bulkStr = bulk ? `\n  ${bulk}` : '';
+  const previewStr = email.preview ? `\n  ${email.preview}` : '';
 
-  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${email.preview ? `\n  ${email.preview}` : ''}`;
+  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${bulkStr}${previewStr}`;
 }
 
 /** Strips HTML markup and decodes common entities to produce readable plain text. */
@@ -117,6 +121,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     'list_emails',
     'List emails in a mailbox with optional filters. Returns paginated results with metadata ' +
       '(read/unread 🔵, flagged ⭐, replied ↩️, attachments 📎, labels 🏷️). ' +
+      'List or machine-generated mail is marked 📰 newsletter / 🤖 automated from its RFC headers, with the unsubscribe URI when the sender offers one — personal mail carries no marker. ' +
       'Use get_email to fetch full body content. ' +
       'ProtonMail note: labels are represented as IMAP folders — use list_labels to discover them, ' +
       'then list_emails with mailbox="Labels/X" to find labeled emails.',
@@ -136,6 +141,12 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
         .optional()
         .describe('Filter: true=has attachments, false=no attachments'),
       answered: z.boolean().optional().describe('Filter: true=replied, false=not yet replied'),
+      preview: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include a ~200 character body preview per message. Off by default: it fetches extra bytes per message and lengthens the output.',
+        ),
     },
     { readOnlyHint: true, destructiveHint: false },
     async (params) => {
@@ -152,6 +163,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
           flagged: params.flagged,
           hasAttachment: params.has_attachment,
           answered: params.answered,
+          preview: params.preview,
         });
 
         if (result.items.length === 0) {
@@ -192,7 +204,9 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
       'Does NOT mark the email as seen (uses IMAP BODY.PEEK — non-destructive). ' +
       'Use format="text" to strip HTML, or format="stripped" to also remove quoted replies and signatures. ' +
       'Use maxLength to cap the body size for large emails. ' +
-      'Set markRead=true only when you want to explicitly mark the email as read.',
+      'Set markRead=true only when you want to explicitly mark the email as read. ' +
+      'A Bulk: line appears for list or machine-generated mail (📰 newsletter / 🤖 automated), ' +
+      'derived from RFC headers, with the unsubscribe URI when the sender offers one.',
     {
       account: z.string().describe('Account name from list_accounts'),
       emailId: z.string().describe('Email ID from list_emails or search_emails'),
@@ -236,6 +250,11 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
 
         parts.push(`Date:   ${email.date}`);
         parts.push(`ID:     ${email.messageId}`);
+
+        const bulk = formatBulk(email.bulk);
+        if (bulk) {
+          parts.push(`Bulk:   ${bulk}`);
+        }
 
         if (email.inReplyTo) {
           parts.push(`Reply:  ${email.inReplyTo}`);
@@ -281,7 +300,8 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     'Fetch the full content of multiple emails in a single call (max 20). ' +
       'More efficient than calling get_email repeatedly when triaging or summarising several emails. ' +
       'Does NOT mark emails as seen. ' +
-      'Defaults to format="text" (HTML stripped) for compact, AI-friendly output.',
+      'Defaults to format="text" (HTML stripped) for compact, AI-friendly output. ' +
+      'Each message carries the same 📰 newsletter / 🤖 automated marker as get_email.',
     {
       account: z.string().describe('Account name from list_accounts'),
       ids: z
@@ -329,6 +349,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
             email.attachments.length > 0
               ? `📎 ${email.attachments.map((a) => a.filename).join(', ')}`
               : '';
+          const bulkLine = formatBulk(email.bulk);
 
           results.push(
             [
@@ -336,6 +357,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
               `Status: ${formatEmailStatus(email)}`,
               `From:   ${from}`,
               `Date:   ${email.date}`,
+              bulkLine ? `Bulk:   ${bulkLine}` : '',
               attachLine,
               '',
               body,
@@ -422,7 +444,8 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
     'Search emails by keyword across subject, sender, and body. ' +
       'Omit query (or pass an empty string) to use it as a pure filter — e.g. find all emails ' +
       'with attachments from a specific recipient without a keyword. ' +
-      'Supports additional filters for recipient, attachments, size, and reply status.',
+      'Supports additional filters for recipient, attachments, size, and reply status. ' +
+      'Results carry the same 📰 newsletter / 🤖 automated markers as list_emails.',
     {
       account: z.string().describe('Account name from list_accounts'),
       query: z
@@ -441,6 +464,12 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
       larger_than: z.number().optional().describe('Minimum email size in KB'),
       smaller_than: z.number().optional().describe('Maximum email size in KB'),
       answered: z.boolean().optional().describe('Filter: true=replied, false=not replied'),
+      preview: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include a ~200 character body preview per message. Off by default: it fetches extra bytes per message and lengthens the output.',
+        ),
     },
     { readOnlyHint: true, destructiveHint: false },
     async (params) => {
@@ -454,6 +483,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
           largerThan: params.larger_than,
           smallerThan: params.smaller_than,
           answered: params.answered,
+          preview: params.preview,
         });
 
         if (result.items.length === 0) {
