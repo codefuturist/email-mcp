@@ -33,8 +33,9 @@ function formatEmailMeta(email: EmailMeta): string {
   const labelStr = email.labels.length > 0 ? `\n  🏷️ ${email.labels.join(', ')}` : '';
   const bulk = formatBulk(email.bulk);
   const bulkStr = bulk ? `\n  ${bulk}` : '';
+  const previewStr = email.preview ? `\n  ${email.preview}` : '';
 
-  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${bulkStr}`;
+  return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${bulkStr}${previewStr}`;
 }
 
 /** Strips HTML markup and decodes common entities to produce readable plain text. */
@@ -140,6 +141,12 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
         .optional()
         .describe('Filter: true=has attachments, false=no attachments'),
       answered: z.boolean().optional().describe('Filter: true=replied, false=not yet replied'),
+      preview: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include a ~200 character body preview per message. Off by default: it fetches extra bytes per message and lengthens the output.',
+        ),
     },
     { readOnlyHint: true, destructiveHint: false },
     async (params) => {
@@ -156,6 +163,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
           flagged: params.flagged,
           hasAttachment: params.has_attachment,
           answered: params.answered,
+          preview: params.preview,
         });
 
         if (result.items.length === 0) {
@@ -456,6 +464,12 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
       larger_than: z.number().optional().describe('Minimum email size in KB'),
       smaller_than: z.number().optional().describe('Maximum email size in KB'),
       answered: z.boolean().optional().describe('Filter: true=replied, false=not replied'),
+      preview: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include a ~200 character body preview per message. Off by default: it fetches extra bytes per message and lengthens the output.',
+        ),
     },
     { readOnlyHint: true, destructiveHint: false },
     async (params) => {
@@ -469,6 +483,7 @@ export default function registerEmailsTools(server: McpServer, imapService: Imap
           largerThan: params.larger_than,
           smallerThan: params.smaller_than,
           answered: params.answered,
+          preview: params.preview,
         });
 
         if (result.items.length === 0) {

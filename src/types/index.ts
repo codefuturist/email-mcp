@@ -187,6 +187,12 @@ export interface EmailMeta {
   answered: boolean;
   hasAttachments: boolean;
   labels: string[];
+  /**
+   * First ~200 characters of the body, decoded from a partial fetch.
+   * Present only when the caller asked for it — it costs extra bytes per
+   * message — and absent when the message has no text part to decode.
+   */
+  preview?: string;
   /** Set only for list or machine-generated mail; absent for personal mail. */
   bulk?: BulkSignal;
 }

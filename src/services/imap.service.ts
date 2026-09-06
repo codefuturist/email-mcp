@@ -22,6 +22,7 @@ import type {
   QuotaInfo,
   SenderStat,
 } from '../types/index.js';
+import { buildPreview, findPreviewPart, PREVIEW_PART_BYTES } from '../utils/body-preview.js';
 import { BULK_HEADER_FIELDS, classifyBulk, parseHeaderBlock } from '../utils/bulk-headers.js';
 import type { LabelStrategy } from './label-strategy.js';
 import { detectLabelStrategy } from './label-strategy.js';
@@ -105,6 +106,51 @@ function findMimePartByFilename(
   return undefined;
 }
 
+/** Decode the preview from an already-fetched body part, when one is present. */
+function previewFromMessage(msg: Record<string, unknown>): string | undefined {
+  const parts = msg.bodyParts as Map<string, Buffer> | undefined;
+  if (!parts) {
+    return undefined;
+  }
+  const part = findPreviewPart(msg.bodyStructure);
+  const raw = part ? parts.get(part.key) : undefined;
+  return part && raw ? buildPreview(raw, part) : undefined;
+}
+
+/**
+ * Fill in previews for the messages whose text sits at section 1.1.
+ *
+ * This needs its own fetch restricted to those UIDs: asking for a section a
+ * message does not have fails the entire batch on Gmail, so 1.1 cannot simply
+ * be added to the first request.
+ */
+async function fetchNestedPreviews(
+  client: ImapFlow,
+  messages: Record<string, unknown>[],
+): Promise<void> {
+  const byUid = new Map<number, Record<string, unknown>>();
+  messages.forEach((msg) => {
+    if (findPreviewPart(msg.bodyStructure)?.key === '1.1') {
+      byUid.set(msg.uid as number, msg);
+    }
+  });
+  if (byUid.size === 0) {
+    return;
+  }
+
+  // eslint-disable-next-line no-restricted-syntax
+  for await (const msg of client.fetch(
+    [...byUid.keys()].join(','),
+    { uid: true, bodyParts: [{ key: '1.1', start: 0, maxLength: PREVIEW_PART_BYTES }] },
+    { uid: true },
+  )) {
+    const target = byUid.get(msg.uid);
+    if (target) {
+      target.bodyParts = msg.bodyParts;
+    }
+  }
+}
+
 function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
   const envelope = (msg.envelope ?? {}) as Record<string, unknown>;
   const flags = new Set((msg.flags ?? []) as string[]);
@@ -132,6 +178,7 @@ function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
     hasAttachments: hasAttachments(msg.bodyStructure),
     labels,
     bulk,
+    preview: previewFromMessage(msg),
   };
 }
 
@@ -289,6 +336,8 @@ export default class ImapService {
       flagged?: boolean;
       hasAttachment?: boolean;
       answered?: boolean;
+      /** Fetch and decode a short body preview. Costs extra bytes per message. */
+      preview?: boolean;
     } = {},
   ): Promise<PaginatedResult<EmailMeta>> {
     const client = await this.connections.getImapClient(accountName);
@@ -356,6 +405,7 @@ export default class ImapService {
       }
 
       const items: EmailMeta[] = [];
+      const raw: Record<string, unknown>[] = [];
       const range = pageUids.join(',');
 
       // eslint-disable-next-line no-restricted-syntax
@@ -367,11 +417,22 @@ export default class ImapService {
           flags: true,
           bodyStructure: true,
           headers: BULK_HEADER_FIELDS,
+          ...(options.preview
+            ? { bodyParts: [{ key: '1', start: 0, maxLength: PREVIEW_PART_BYTES }] }
+            : {}),
         },
         { uid: true },
       )) {
-        items.push(messageToEmailMeta(msg as unknown as Record<string, unknown>));
+        raw.push(msg as unknown as Record<string, unknown>);
       }
+
+      if (options.preview) {
+        await fetchNestedPreviews(client, raw);
+      }
+
+      raw.forEach((msg) => {
+        items.push(messageToEmailMeta(msg));
+      });
 
       // Sort by date descending
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -495,6 +556,8 @@ export default class ImapService {
       largerThan?: number;
       smallerThan?: number;
       answered?: boolean;
+      /** Fetch and decode a short body preview. Costs extra bytes per message. */
+      preview?: boolean;
     } = {},
   ): Promise<PaginatedResult<EmailMeta>> {
     const client = await this.connections.getImapClient(accountName);
@@ -582,6 +645,7 @@ export default class ImapService {
       }
 
       const items: EmailMeta[] = [];
+      const raw: Record<string, unknown>[] = [];
       const range = pageUids.join(',');
 
       // eslint-disable-next-line no-restricted-syntax
@@ -593,11 +657,22 @@ export default class ImapService {
           flags: true,
           bodyStructure: true,
           headers: BULK_HEADER_FIELDS,
+          ...(options.preview
+            ? { bodyParts: [{ key: '1', start: 0, maxLength: PREVIEW_PART_BYTES }] }
+            : {}),
         },
         { uid: true },
       )) {
-        items.push(messageToEmailMeta(msg as unknown as Record<string, unknown>));
+        raw.push(msg as unknown as Record<string, unknown>);
       }
+
+      if (options.preview) {
+        await fetchNestedPreviews(client, raw);
+      }
+
+      raw.forEach((msg) => {
+        items.push(messageToEmailMeta(msg));
+      });
 
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
