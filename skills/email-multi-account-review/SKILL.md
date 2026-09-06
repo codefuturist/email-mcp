@@ -6,6 +6,8 @@ description: >-
 metadata:
   version: 1.0.0
   requires:
+    skills:
+      - email-mcp
     mcp:
       - email-mcp
 ---
@@ -15,15 +17,9 @@ metadata:
 Give the user one picture of every mailbox they have configured, without making
 them ask account by account.
 
-## Before you start
-
-**There is no unified inbox.** Every `email-mcp` tool takes a single `account`,
-so a cross-account view is something you assemble by calling each account in
-turn and aggregating the results yourself. Do not present a total you did not
-actually compute.
-
-`account` is the account `name` from `config.toml` (e.g. `perso`, `gmail`),
-never an email address.
+**Prerequisite:** the `email-mcp` base skill. In particular: there is no unified
+inbox, so a cross-account view is assembled by iterating accounts — never present
+a total you did not actually compute.
 
 ## Steps
 

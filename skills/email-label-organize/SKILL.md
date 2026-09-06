@@ -6,6 +6,8 @@ description: >-
 metadata:
   version: 1.0.0
   requires:
+    skills:
+      - email-mcp
     mcp:
       - email-mcp
 ---
@@ -15,19 +17,8 @@ metadata:
 Organize mail using IMAP keywords (labels) and folders. Apply project labels,
 strip incorrect ones, and move misfiled messages.
 
-## Before you start
-
-Three things about `email-mcp` differ from other mail tools and will cause
-silent mistakes if you assume otherwise:
-
-- **`account` is a config name, not an address.** It is the `name` field of an
-  account in `config.toml` (e.g. `perso`), never `you@example.com`. Always call
-  `list_accounts` first and use the names it returns.
-- **`account` and `mailbox` are separate parameters.** There is no qualified
-  `account:Folder` syntax; pass `{ "account": "perso", "mailbox": "Projects" }`.
-- **`bulk_action` cannot apply labels.** It supports only `mark_read`,
-  `mark_unread`, `flag`, `unflag`, `move` and `delete`, with at most 100 ids.
-  Labelling several messages means calling `add_label` once per message.
+**Prerequisite:** the `email-mcp` base skill, which covers how accounts and
+mailboxes are addressed and why `bulk_action` cannot apply labels.
 
 ## Steps
 
