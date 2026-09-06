@@ -110,10 +110,6 @@ describe('stripHtml', () => {
     expect(stripHtml('<script>var x=1</script><p>Body</p>')).toBe('Body');
   });
 
-  it('decodes the entities that survive tag removal', () => {
-    expect(stripHtml('<p>a&nbsp;&amp;&nbsp;b</p>')).toBe('a & b');
-  });
-
   it('drops the head, which is never content', () => {
     const doc =
       '<!DOCTYPE html><html><head><meta charset="utf-8"><title>x</title></head><body>Real text</body></html>';

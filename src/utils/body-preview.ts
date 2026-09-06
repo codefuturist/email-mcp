@@ -49,14 +49,6 @@ export function stripHtml(html: string): string {
       // …and can equally end inside an ordinary tag, which would otherwise
       // survive tag removal and show up as "<meta name=" in the preview.
       .replace(/<[^>]*$/, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-      .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)))
       .replace(/\s+/g, ' ')
       // Every tag becomes a space, so "<b>word</b>," would read "word ,".
       .replace(/ +([,.;:!?)\]])/g, '$1')
@@ -126,6 +118,58 @@ export function decodeCharset(buffer: Buffer, charset: string | undefined): stri
   }
 }
 
+/** Named entities common in mail; anything else is decoded numerically. */
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: ' ',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  // Zero-width characters, used by bulk senders to pad the preheader.
+  zwnj: '',
+  zwj: '',
+  shy: '',
+  ndash: '–',
+  mdash: '—',
+  hellip: '…',
+  rsquo: '’',
+  lsquo: '‘',
+  ldquo: '“',
+  rdquo: '”',
+};
+
+/**
+ * Decode HTML entities and drop zero-width padding.
+ *
+ * Applied to plain-text parts too: senders put entities in them, and a preview
+ * reading "&zwnj; &zwnj; &zwnj;" is worse than showing nothing.
+ */
+export function decodeEntities(text: string): string {
+  return text
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(
+      /&([a-z]+);/gi,
+      (match: string, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match,
+    )
+    .replace(/[\u200B-\u200D\uFEFF]/g, '');
+}
+
+/**
+ * Cut the text where a stylesheet begins.
+ *
+ * Bulk senders concatenate the preheader and the CSS into a single part, with
+ * no tag to mark the boundary, so the readable half is the prefix. Matches an
+ * at-rule, a CSS comment, or a selector followed by a declaration block.
+ */
+export function cutAtStyleSheet(text: string): string {
+  const start = text.search(
+    /\/\*|@(?:media|font-face|import|supports)\b|[a-z-]+\s*[,{][^{}]*[:;]/i,
+  );
+  return start === -1 ? text : text.slice(0, start);
+}
+
 /** The body part a preview should be built from. */
 export interface PreviewPart {
   /** IMAP section number to fetch. */
@@ -180,7 +224,8 @@ export function buildPreview(raw: Buffer, part: PreviewPart): string | undefined
   // Trust the content over the declared type: a text/plain part carrying markup
   // would otherwise put raw CSS in the preview.
   const isMarkup = part.type === 'text/html' || LOOKS_LIKE_MARKUP.test(decoded);
-  const text = (isMarkup ? stripHtml(decoded) : decoded.replace(/\s+/g, ' ').trim())
+  const stripped = isMarkup ? stripHtml(decoded) : decoded;
+  const text = cutAtStyleSheet(decodeEntities(stripped).replace(/\s+/g, ' ').trim())
     // The fetch can end mid-character: a complete "=C3" escape is still an
     // incomplete UTF-8 sequence, which decodes to U+FFFD. That is truncation
     // damage, not content.
