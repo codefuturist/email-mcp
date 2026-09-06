@@ -84,7 +84,7 @@ export default function registerThreadTools(server: McpServer, imapService: Imap
         .describe(
           'Body format: full=raw (default), text=plain text (strips HTML), stripped=plain text without quoted replies or signatures',
         ),
-      maxLength: z
+      maxLength: z.coerce
         .number()
         .int()
         .min(100)
