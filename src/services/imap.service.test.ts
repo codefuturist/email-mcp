@@ -18,6 +18,8 @@ function createMockImapClient() {
     messageDelete: vi.fn().mockResolvedValue(true),
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
+    fetchOne: vi.fn().mockResolvedValue(undefined),
+    download: vi.fn().mockResolvedValue(undefined),
     _releaseFn: releaseFn,
   };
 }
@@ -164,5 +166,96 @@ describe('ImapService', () => {
 
       expect(client.messageFlagsAdd).toHaveBeenCalledWith('10', ['\\Flagged'], { uid: true });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findEmailFolder
+// ---------------------------------------------------------------------------
+
+describe('ImapService.findEmailFolder', () => {
+  let client: ReturnType<typeof createMockImapClient>;
+  let service: ImapService;
+
+  /** Mailboxes as client.list() returns them, in an unhelpful order. */
+  const mailboxes = [
+    { path: 'Archives2019', listed: true, flags: new Set<string>() },
+    { path: 'Klakedelle', listed: true, flags: new Set<string>() },
+    { path: 'Sent', listed: true, flags: new Set<string>(), specialUse: '\\Sent' },
+    { path: 'INBOX', listed: true, flags: new Set<string>() },
+    { path: 'Travaux', listed: true, flags: new Set<string>() },
+  ];
+
+  beforeEach(() => {
+    client = createMockImapClient();
+    service = new ImapService(createMockConnectionManager(client));
+    client.fetchOne.mockResolvedValue({
+      headers: Buffer.from('Message-ID: <target@example.com>\r\n'),
+    });
+    client.list.mockResolvedValue(mailboxes);
+  });
+
+  /** Make the Message-ID search hit in exactly one mailbox. */
+  function messageLivesIn(path: string) {
+    let currentMailbox = '';
+    client.getMailboxLock.mockImplementation(async (mailboxPath: string) => {
+      currentMailbox = mailboxPath;
+      return { release: vi.fn() };
+    });
+    client.search.mockImplementation(async () => (currentMailbox === path ? [42] : []));
+  }
+
+  it('searches INBOX before any other folder', async () => {
+    messageLivesIn('INBOX');
+
+    const result = await service.findEmailFolder('test', '42', 'INBOX');
+
+    expect(result.folders).toEqual(['INBOX']);
+    // One SELECT and one SEARCH, not one per folder.
+    expect(client.search).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops as soon as a folder matches', async () => {
+    messageLivesIn('Sent');
+
+    const result = await service.findEmailFolder('test', '42', 'INBOX');
+
+    expect(result.folders).toEqual(['Sent']);
+    // INBOX then Sent — the three remaining folders are never selected, which
+    // is the whole point: header SEARCH is an unindexed scan per folder.
+    expect(client.search).toHaveBeenCalledTimes(2);
+  });
+
+  it('still finds a message in an ordinary folder', async () => {
+    messageLivesIn('Klakedelle');
+
+    const result = await service.findEmailFolder('test', '42', 'INBOX');
+
+    expect(result.folders).toEqual(['Klakedelle']);
+  });
+
+  it('reports no folder when nothing matches', async () => {
+    messageLivesIn('nowhere');
+
+    const result = await service.findEmailFolder('test', '42', 'INBOX');
+
+    expect(result.folders).toEqual([]);
+    expect(result.messageId).toBe('<target@example.com>');
+  });
+
+  it('keeps searching past a folder it cannot select', async () => {
+    let currentMailbox = '';
+    client.getMailboxLock.mockImplementation(async (mailboxPath: string) => {
+      currentMailbox = mailboxPath;
+      // Sent is searched second, before the match — an unselectable folder
+      // there must not abandon the hunt.
+      if (mailboxPath === 'Sent') throw new Error('NO [SERVERBUG] cannot select');
+      return { release: vi.fn() };
+    });
+    client.search.mockImplementation(async () => (currentMailbox === 'Klakedelle' ? [42] : []));
+
+    const result = await service.findEmailFolder('test', '42', 'INBOX');
+
+    expect(result.folders).toEqual(['Klakedelle']);
   });
 });
