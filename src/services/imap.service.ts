@@ -18,6 +18,7 @@ import type {
   EmailStats,
   LabelInfo,
   Mailbox,
+  MailboxSnapshot,
   PaginatedResult,
   QuotaInfo,
   SenderStat,
@@ -1643,6 +1644,38 @@ export default class ImapService {
   // -------------------------------------------------------------------------
   // Quota
   // -------------------------------------------------------------------------
+
+  /**
+   * Mailbox counters without scanning the mailbox.
+   *
+   * STATUS answers the totals directly, and counting today's arrivals needs
+   * only the length of a SEARCH result — no envelopes, no body structure. Two
+   * round trips, whatever the mailbox holds.
+   */
+  async getMailboxSnapshot(accountName: string, mailbox = 'INBOX'): Promise<MailboxSnapshot> {
+    const client = await this.connections.getImapClient(accountName);
+    const safeMailbox = sanitizeMailboxName(mailbox);
+
+    const status = await client.status(safeMailbox, { messages: true, unseen: true });
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const lock = await client.getMailboxLock(safeMailbox);
+    let receivedToday = 0;
+    try {
+      const todayUids = await client.search({ since: startOfToday }, { uid: true });
+      receivedToday = Array.isArray(todayUids) ? todayUids.length : 0;
+    } finally {
+      lock.release();
+    }
+
+    return {
+      total: status.messages ?? 0,
+      unread: status.unseen ?? 0,
+      receivedToday,
+    };
+  }
 
   async getQuota(accountName: string): Promise<QuotaInfo | null> {
     const client = await this.connections.getImapClient(accountName);

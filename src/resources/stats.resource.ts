@@ -36,17 +36,22 @@ export default function registerStatsResource(
     async (uri, { account }) => {
       const accountName = account as string;
 
-      // Lightweight STATUS query (fast, no envelope fetch)
-      const stats = await imapService.getEmailStats(accountName, 'INBOX', 'day');
+      // STATUS plus one SEARCH — two round trips, no envelope fetch. This used
+      // to call getEmailStats, which fetches envelope and body structure for
+      // every message in the period, while the comment here claimed it was a
+      // lightweight STATUS query.
+      const mailbox = await imapService.getMailboxSnapshot(accountName, 'INBOX');
 
       const quota = await imapService.getQuota(accountName);
 
       const snapshot = {
         account: accountName,
         date: new Date().toISOString().split('T')[0],
-        inbox_total: stats.totalReceived,
-        inbox_unread: stats.unreadCount,
-        inbox_today: stats.totalReceived,
+        // Previously the day's arrivals were reported as the mailbox total too,
+        // so inbox_total was wrong on any account with more than a day of mail.
+        inbox_total: mailbox.total,
+        inbox_unread: mailbox.unread,
+        inbox_today: mailbox.receivedToday,
         quota: quota ?? undefined,
       };
 
