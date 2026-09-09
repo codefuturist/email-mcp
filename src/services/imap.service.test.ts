@@ -166,3 +166,58 @@ describe('ImapService', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// getMailboxSnapshot
+// ---------------------------------------------------------------------------
+
+describe('ImapService.getMailboxSnapshot', () => {
+  let client: ReturnType<typeof createMockImapClient>;
+  let service: ImapService;
+
+  beforeEach(() => {
+    client = createMockImapClient();
+    service = new ImapService(createMockConnectionManager(client));
+  });
+
+  it('takes its totals from STATUS, not from a scan', async () => {
+    client.status.mockResolvedValue({ messages: 1709, unseen: 711 });
+    client.search.mockResolvedValue([101, 102, 103]);
+
+    const snapshot = await service.getMailboxSnapshot('test', 'INBOX');
+
+    expect(snapshot).toEqual({ total: 1709, unread: 711, receivedToday: 3 });
+    // No envelope or body-structure fetch: that was the old cost, on a code
+    // path documented as a lightweight STATUS query.
+    expect(client.fetch).not.toHaveBeenCalled();
+  });
+
+  it('counts today from midnight local time', async () => {
+    client.status.mockResolvedValue({ messages: 10, unseen: 0 });
+    client.search.mockResolvedValue([]);
+
+    await service.getMailboxSnapshot('test', 'INBOX');
+
+    const searchCriteria = client.search.mock.calls[0]?.[0] as { since: Date };
+    expect(searchCriteria.since.getHours()).toBe(0);
+    expect(searchCriteria.since.getMinutes()).toBe(0);
+    expect(searchCriteria.since.toDateString()).toBe(new Date().toDateString());
+  });
+
+  it('treats missing STATUS counters as zero', async () => {
+    client.status.mockResolvedValue({});
+    client.search.mockResolvedValue([]);
+
+    const snapshot = await service.getMailboxSnapshot('test', 'INBOX');
+
+    expect(snapshot).toEqual({ total: 0, unread: 0, receivedToday: 0 });
+  });
+
+  it('releases the mailbox lock even when the search fails', async () => {
+    client.status.mockResolvedValue({ messages: 1, unseen: 0 });
+    client.search.mockRejectedValue(new Error('NO [SERVERBUG]'));
+
+    await expect(service.getMailboxSnapshot('test', 'INBOX')).rejects.toThrow('NO [SERVERBUG]');
+    expect(client._releaseFn).toHaveBeenCalled();
+  });
+});

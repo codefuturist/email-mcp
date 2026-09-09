@@ -332,6 +332,16 @@ export interface EmailStats {
   avgPerDay: number;
 }
 
+/** Cheap mailbox counters, from STATUS plus one SEARCH. */
+export interface MailboxSnapshot {
+  /** Messages in the mailbox. */
+  total: number;
+  /** Unread messages in the mailbox. */
+  unread: number;
+  /** Messages whose internal date falls today. */
+  receivedToday: number;
+}
+
 export interface QuotaInfo {
   usedMb: number;
   totalMb: number;
