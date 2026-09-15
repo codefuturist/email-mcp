@@ -24,6 +24,11 @@ import type {
 } from '../types/index.js';
 import type { LabelStrategy } from './label-strategy.js';
 import { detectLabelStrategy } from './label-strategy.js';
+import {
+  extractAttachments,
+  findMimePartByFilename,
+  hasAttachments,
+} from './mime-attachments.js';
 
 // ---------------------------------------------------------------------------
 // Helpers (must be defined before ImapService)
@@ -39,69 +44,6 @@ function parseAddress(addr: { name?: string; address?: string } | undefined): Em
 function parseAddresses(addrs: { name?: string; address?: string }[] | undefined): EmailAddress[] {
   if (!addrs) return [];
   return addrs.map(parseAddress);
-}
-
-function hasAttachments(bodyStructure: unknown): boolean {
-  if (!bodyStructure || typeof bodyStructure !== 'object') return false;
-  const bs = bodyStructure as Record<string, unknown>;
-  if (bs.disposition === 'attachment') return true;
-  if (Array.isArray(bs.childNodes)) {
-    return bs.childNodes.some((child: unknown) => hasAttachments(child));
-  }
-  return false;
-}
-
-function extractAttachments(bodyStructure: unknown): AttachmentMeta[] {
-  const attachments: AttachmentMeta[] = [];
-  if (!bodyStructure || typeof bodyStructure !== 'object') return attachments;
-
-  const bs = bodyStructure as Record<string, unknown>;
-  if (bs.disposition === 'attachment') {
-    const params = (bs.dispositionParameters ?? bs.parameters ?? {}) as Record<string, string>;
-    attachments.push({
-      filename: params.filename ?? params.name ?? 'unnamed',
-      mimeType: `${bs.type ?? 'application'}/${bs.subtype ?? 'octet-stream'}`,
-      size: (bs.size as number) ?? 0,
-    });
-  }
-
-  if (Array.isArray(bs.childNodes)) {
-    (bs.childNodes as unknown[]).forEach((child) => {
-      attachments.push(...extractAttachments(child));
-    });
-  }
-
-  return attachments;
-}
-
-/** Find the MIME part number for an attachment by filename. */
-function findMimePartByFilename(
-  bodyStructure: unknown,
-  targetFilename: string,
-  partPath = '',
-): string | undefined {
-  if (!bodyStructure || typeof bodyStructure !== 'object') return undefined;
-
-  const bs = bodyStructure as Record<string, unknown>;
-  const currentPart = bs.part as string | undefined;
-  const effectivePath = currentPart ?? partPath;
-
-  if (bs.disposition === 'attachment') {
-    const params = (bs.dispositionParameters ?? bs.parameters ?? {}) as Record<string, string>;
-    const filename = params.filename ?? params.name ?? 'unnamed';
-    if (filename === targetFilename) return effectivePath;
-  }
-
-  if (Array.isArray(bs.childNodes)) {
-    // eslint-disable-next-line no-plusplus
-    for (let i = 0; i < bs.childNodes.length; i++) {
-      const childPart = effectivePath ? `${effectivePath}.${i + 1}` : String(i + 1);
-      const found = findMimePartByFilename(bs.childNodes[i], targetFilename, childPart);
-      if (found) return found;
-    }
-  }
-
-  return undefined;
 }
 
 function messageToEmailMeta(msg: Record<string, unknown>): EmailMeta {
