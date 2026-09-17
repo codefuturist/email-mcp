@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import type { AttachmentInput } from '../types/index.js';
+
 /** Input validation and sanitization utilities. */
 
 /**
@@ -6,6 +9,14 @@
  * @param name - The mailbox name to validate.
  * @returns The trimmed mailbox name.
  */
+
+/** Maximum number of attachments allowed on a single outgoing email. */
+export const MAX_ATTACHMENTS = 10;
+/** Maximum size of a single attachment, in bytes (25 MB). */
+export const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+/** Maximum combined size of all attachments on a single email, in bytes (40 MB). */
+export const MAX_TOTAL_ATTACHMENTS_SIZE = 40 * 1024 * 1024;
+
 export function sanitizeMailboxName(name: string): string {
   const trimmed = name.trim();
   if (trimmed.length === 0) {
@@ -117,5 +128,86 @@ export function validateLabelName(name: string): string {
 export function validateInputLength(input: string, maxLength: number, fieldName: string): void {
   if (input.length > maxLength) {
     throw new Error(`${fieldName} exceeds maximum length of ${maxLength} characters`);
+  }
+}
+
+/** Decoded byte size of a base64 string, without allocating a Buffer. */
+function base64DecodedSize(base64: string): number {
+  const cleaned = base64.replace(/\s/g, '');
+  let padding = 0;
+  if (cleaned.endsWith('==')) padding = 2;
+  else if (cleaned.endsWith('=')) padding = 1;
+  return Math.floor((cleaned.length * 3) / 4) - padding;
+}
+
+/**
+ * Validate outgoing email attachments (from send_email, reply_email, forward_email,
+ * save_draft, reply_draft). Enforces count and size limits and rejects unsafe filenames.
+ * Each attachment must provide exactly one of `content` (base64) or `path`.
+ * Path-based sizes are included in the combined total via filesystem stats.
+ */
+export async function validateAttachments(
+  attachments: AttachmentInput[] | undefined,
+): Promise<void> {
+  if (!attachments || attachments.length === 0) return;
+
+  if (attachments.length > MAX_ATTACHMENTS) {
+    throw new Error(
+      `Too many attachments: max ${MAX_ATTACHMENTS} allowed, got ${attachments.length}`,
+    );
+  }
+
+  const sizes = await Promise.all(
+    attachments.map(async (att) => {
+      const filename = att.filename?.trim();
+      if (!filename) {
+        throw new Error('Each attachment must have a non-empty filename');
+      }
+      /* eslint-disable no-control-regex */
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — reject control chars and path separators in filenames
+      if (/[\x00-\x1F/\\]/.test(filename)) {
+        throw new Error(
+          `Attachment filename "${filename}" must not contain path separators or control characters`,
+        );
+      }
+      /* eslint-enable no-control-regex */
+
+      const hasContent = typeof att.content === 'string' && att.content.length > 0;
+      const hasPath = typeof att.path === 'string' && att.path.length > 0;
+      if (hasContent === hasPath) {
+        throw new Error(
+          `Attachment "${filename}" must provide exactly one of "content" (base64) or "path"`,
+        );
+      }
+
+      let size = 0;
+      if (hasContent) {
+        size = base64DecodedSize(att.content as string);
+      } else {
+        const filePath = att.path as string;
+        const stat = await fs.stat(filePath).catch(() => {
+          throw new Error(`Attachment "${filename}": file not found at path "${filePath}"`);
+        });
+        if (!stat.isFile()) {
+          throw new Error(`Attachment "${filename}": path "${filePath}" is not a file`);
+        }
+        size = stat.size;
+      }
+
+      if (size > MAX_ATTACHMENT_SIZE) {
+        throw new Error(
+          `Attachment "${filename}" (${Math.round(size / 1024 / 1024)}MB) exceeds the ${MAX_ATTACHMENT_SIZE / 1024 / 1024}MB per-file limit`,
+        );
+      }
+      return size;
+    }),
+  );
+
+  const totalSize = sizes.reduce((sum, size) => sum + size, 0);
+
+  if (totalSize > MAX_TOTAL_ATTACHMENTS_SIZE) {
+    throw new Error(
+      `Total attachment size (${Math.round(totalSize / 1024 / 1024)}MB) exceeds the ${MAX_TOTAL_ATTACHMENTS_SIZE / 1024 / 1024}MB combined limit`,
+    );
   }
 }

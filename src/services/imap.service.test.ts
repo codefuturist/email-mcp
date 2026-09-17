@@ -18,6 +18,7 @@ function createMockImapClient() {
     messageDelete: vi.fn().mockResolvedValue(true),
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
+    append: vi.fn().mockResolvedValue({ uid: 42 }),
     _releaseFn: releaseFn,
   };
 }
@@ -163,6 +164,166 @@ describe('ImapService', () => {
       await service.setFlags('test', '10', 'INBOX', 'flag');
 
       expect(client.messageFlagsAdd).toHaveBeenCalledWith('10', ['\\Flagged'], { uid: true });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // saveDraft
+  // -----------------------------------------------------------------------
+
+  describe('saveDraft', () => {
+    it('builds a MIME message via MailComposer when there are no attachments', async () => {
+      const result = await service.saveDraft('test', {
+        to: ['dest@example.com'],
+        subject: 'Hello',
+        body: 'World',
+      });
+
+      expect(result).toEqual({ id: 42, mailbox: 'Drafts' });
+      const [mailbox, raw, flags] = client.append.mock.calls[0];
+      expect(mailbox).toBe('Drafts');
+      expect(flags).toEqual(['\\Draft', '\\Seen']);
+      expect(Buffer.isBuffer(raw)).toBe(true);
+      const text = (raw as Buffer).toString('utf-8');
+      expect(text).toMatch(/Subject:.*Hello/);
+      expect(text).toContain('dest@example.com');
+      expect(text).toContain('World');
+      expect(text).toMatch(/MIME-Version:/i);
+    });
+
+    it('builds a multipart MIME message with the attachment when attachments are provided', async () => {
+      const result = await service.saveDraft('test', {
+        to: ['dest@example.com'],
+        subject: 'With attachment',
+        body: 'See attached',
+        attachments: [
+          {
+            filename: 'note.txt',
+            content: Buffer.from('hello').toString('base64'),
+            contentType: 'text/plain',
+          },
+        ],
+      });
+
+      expect(result).toEqual({ id: 42, mailbox: 'Drafts' });
+      const [, raw] = client.append.mock.calls[0];
+      const text = (raw as Buffer).toString('utf-8');
+      expect(text).toContain('multipart/mixed');
+      expect(text).toContain('Content-Disposition: attachment; filename=note.txt');
+      expect(text).toContain(Buffer.from('hello').toString('base64'));
+      expect(text).toContain('See attached');
+    });
+
+    it('rejects invalid attachments before appending', async () => {
+      await expect(
+        service.saveDraft('test', {
+          to: ['dest@example.com'],
+          subject: 'Bad',
+          body: 'oops',
+          attachments: [{ filename: 'note.txt' }],
+        }),
+      ).rejects.toThrow('exactly one of "content"');
+
+      expect(client.append).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // saveReplyDraft
+  // -----------------------------------------------------------------------
+
+  describe('saveReplyDraft', () => {
+    it('appends a threaded reply to the Drafts folder without sending', async () => {
+      client.list.mockResolvedValue([
+        { path: 'INBOX' },
+        { path: 'Drafts', specialUse: '\\Drafts' },
+      ]);
+      const append = vi.fn().mockResolvedValue({ uid: 501 });
+      Object.assign(client, { append });
+      const getEmail = vi.spyOn(service, 'getEmail').mockResolvedValue({
+        id: '123',
+        subject: 'Agreement',
+        from: { name: 'Tom', address: 'tom@example.org' },
+        to: [{ address: 'test@example.com' }],
+        date: '2026-09-16T08:15:00.000Z',
+        seen: true,
+        flagged: false,
+        answered: false,
+        hasAttachments: false,
+        labels: [],
+        messageId: '<orig@example.org>',
+        bodyText: 'Please sign.',
+        attachments: [],
+        headers: {},
+      });
+
+      const result = await service.saveReplyDraft('test', {
+        emailId: '123',
+        mailbox: 'INBOX',
+        body: 'Signed copy attached.',
+      });
+
+      expect(getEmail).toHaveBeenCalledWith('test', '123', 'INBOX');
+      expect(append).toHaveBeenCalledTimes(1);
+      const [path, raw, flags] = append.mock.calls[0] as [string, Buffer, string[]];
+      expect(path).toBe('Drafts');
+      expect(flags).toEqual(['\\Draft', '\\Seen']);
+      const message = raw.toString('utf8');
+      expect(message).toMatch(/^In-Reply-To: <orig@example\.org>/m);
+      expect(message).toMatch(/^References: <orig@example\.org>/m);
+      expect(message).toMatch(/^Subject: Re: Agreement/m);
+      expect(message).toMatch(/^To: "?Tom"? <tom@example\.org>/m);
+      expect(message).toContain('history_container');
+      expect(message).not.toContain('<pre>');
+      expect(connections.getSmtpTransport).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        id: 501,
+        mailbox: 'Drafts',
+        subject: 'Re: Agreement',
+        to: ['tom@example.org'],
+        cc: [],
+        inReplyTo: '<orig@example.org>',
+      });
+    });
+
+    it('includes attachments in the reply draft MIME', async () => {
+      client.list.mockResolvedValue([{ path: 'Drafts', specialUse: '\\Drafts' }]);
+      const append = vi.fn().mockResolvedValue({ uid: 502 });
+      Object.assign(client, { append });
+      vi.spyOn(service, 'getEmail').mockResolvedValue({
+        id: '123',
+        subject: 'Agreement',
+        from: { name: 'Tom', address: 'tom@example.org' },
+        to: [{ address: 'test@example.com' }],
+        date: '2026-09-16T08:15:00.000Z',
+        seen: true,
+        flagged: false,
+        answered: false,
+        hasAttachments: false,
+        labels: [],
+        messageId: '<orig@example.org>',
+        bodyText: 'Please sign.',
+        attachments: [],
+        headers: {},
+      });
+
+      await service.saveReplyDraft('test', {
+        emailId: '123',
+        body: 'Signed.',
+        attachments: [
+          {
+            filename: 'signed.pdf',
+            content: Buffer.from('pdf-bytes').toString('base64'),
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+
+      const [, raw] = append.mock.calls[0] as [string, Buffer, string[]];
+      const message = raw.toString('utf8');
+      expect(message).toContain('multipart/mixed');
+      expect(message).toContain('Content-Disposition: attachment; filename=signed.pdf');
+      expect(message).toContain(Buffer.from('pdf-bytes').toString('base64'));
     });
   });
 });

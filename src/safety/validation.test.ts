@@ -1,7 +1,11 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   sanitizeMailboxName,
   sanitizeSearchQuery,
   sanitizeTemplateVariable,
+  validateAttachments,
   validateInputLength,
   validateLabelName,
   validateWebhookUrl,
@@ -155,6 +159,102 @@ describe('validateLabelName', () => {
 
   it('trims whitespace and returns valid name', () => {
     expect(validateLabelName('  Important  ')).toBe('Important');
+  });
+});
+
+describe('validateAttachments', () => {
+  it('allows undefined and empty arrays', async () => {
+    await expect(validateAttachments(undefined)).resolves.toBeUndefined();
+    await expect(validateAttachments([])).resolves.toBeUndefined();
+  });
+
+  it('allows a valid base64 attachment', async () => {
+    await expect(
+      validateAttachments([
+        { filename: 'a.txt', content: Buffer.from('hello').toString('base64') },
+      ]),
+    ).resolves.toBeUndefined();
+  });
+
+  it('allows a valid path-based attachment', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'att-'));
+    const filePath = path.join(dir, 'a.txt');
+    await fs.writeFile(filePath, 'hello');
+    await expect(
+      validateAttachments([{ filename: 'a.txt', path: filePath }]),
+    ).resolves.toBeUndefined();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('throws when a path does not exist', async () => {
+    await expect(
+      validateAttachments([{ filename: 'a.txt', path: '/tmp/email-mcp-missing-att-xyz.txt' }]),
+    ).rejects.toThrow('file not found');
+  });
+
+  it('throws when more than the max number of attachments are given', async () => {
+    const attachments = Array.from({ length: 11 }, (_, i) => ({
+      filename: `f${i}.txt`,
+      content: 'aGVsbG8=',
+    }));
+    await expect(validateAttachments(attachments)).rejects.toThrow('Too many attachments');
+  });
+
+  it('throws on empty filename', async () => {
+    await expect(validateAttachments([{ filename: '', content: 'aGVsbG8=' }])).rejects.toThrow(
+      'non-empty filename',
+    );
+  });
+
+  it('throws on filename with a path separator', async () => {
+    await expect(
+      validateAttachments([{ filename: '../evil.txt', content: 'aGVsbG8=' }]),
+    ).rejects.toThrow('path separators');
+  });
+
+  it('throws when neither content nor path is provided', async () => {
+    await expect(validateAttachments([{ filename: 'a.txt' }])).rejects.toThrow(
+      'exactly one of "content"',
+    );
+  });
+
+  it('throws when both content and path are provided', async () => {
+    await expect(
+      validateAttachments([{ filename: 'a.txt', content: 'aGVsbG8=', path: '/tmp/a.txt' }]),
+    ).rejects.toThrow('exactly one of "content"');
+  });
+
+  it('throws when a single attachment exceeds the per-file limit', async () => {
+    const oversized = Buffer.alloc(26 * 1024 * 1024).toString('base64');
+    await expect(
+      validateAttachments([{ filename: 'big.bin', content: oversized }]),
+    ).rejects.toThrow('exceeds the 25MB per-file limit');
+  });
+
+  it('throws when combined attachments exceed the total size limit', async () => {
+    const chunk = Buffer.alloc(15 * 1024 * 1024).toString('base64');
+    const attachments = [
+      { filename: 'a.bin', content: chunk },
+      { filename: 'b.bin', content: chunk },
+      { filename: 'c.bin', content: chunk },
+    ];
+    await expect(validateAttachments(attachments)).rejects.toThrow('combined limit');
+  });
+
+  it('throws when combined path-based attachments exceed the total size limit', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'att-total-'));
+    const names = ['a.bin', 'b.bin', 'c.bin'];
+    const filePaths = await Promise.all(
+      names.map(async (name) => {
+        const filePath = path.join(dir, name);
+        await fs.writeFile(filePath, Buffer.alloc(15 * 1024 * 1024));
+        return filePath;
+      }),
+    );
+    await expect(
+      validateAttachments(filePaths.map((p, i) => ({ filename: `f${i}.bin`, path: p }))),
+    ).rejects.toThrow('combined limit');
+    await fs.rm(dir, { recursive: true, force: true });
   });
 });
 

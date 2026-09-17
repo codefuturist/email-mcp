@@ -6,8 +6,13 @@
 
 import type { ImapFlow } from 'imapflow';
 import type { IConnectionManager } from '../connections/types.js';
-import { sanitizeMailboxName, sanitizeSearchQuery } from '../safety/validation.js';
+import {
+  sanitizeMailboxName,
+  sanitizeSearchQuery,
+  validateAttachments,
+} from '../safety/validation.js';
 import type {
+  AttachmentInput,
   AttachmentMeta,
   BulkResult,
   Contact,
@@ -22,8 +27,11 @@ import type {
   QuotaInfo,
   SenderStat,
 } from '../types/index.js';
+import { buildRawMessage, resolveAttachments } from '../utils/mail-attachments.js';
 import type { LabelStrategy } from './label-strategy.js';
 import { detectLabelStrategy } from './label-strategy.js';
+import type { ReplyDraftOptions } from './reply-draft.js';
+import { buildReplyDraft } from './reply-draft.js';
 
 // ---------------------------------------------------------------------------
 // Helpers (must be defined before ImapService)
@@ -39,6 +47,53 @@ function parseAddress(addr: { name?: string; address?: string } | undefined): Em
 function parseAddresses(addrs: { name?: string; address?: string }[] | undefined): EmailAddress[] {
   if (!addrs) return [];
   return addrs.map(parseAddress);
+}
+
+function partMimeType(bs: Record<string, unknown>): string {
+  const type = String(bs.type ?? '').toLowerCase();
+  if (type.includes('/')) return type;
+  return `${bs.type ?? 'application'}/${bs.subtype ?? 'octet-stream'}`.toLowerCase();
+}
+
+/** Find the MIME part path for text/plain or text/html in an ImapFlow bodyStructure. */
+function findTextPartPath(
+  bodyStructure: unknown,
+  want: 'text/plain' | 'text/html',
+  partPath = '',
+): string | undefined {
+  if (!bodyStructure || typeof bodyStructure !== 'object') return undefined;
+  const bs = bodyStructure as Record<string, unknown>;
+  const currentPart = typeof bs.part === 'string' ? bs.part : partPath;
+  const mime = partMimeType(bs);
+  if (mime === want) return currentPart || '1';
+  if (Array.isArray(bs.childNodes)) {
+    // eslint-disable-next-line no-plusplus
+    for (let i = 0; i < bs.childNodes.length; i++) {
+      const childPart = currentPart ? `${currentPart}.${i + 1}` : String(i + 1);
+      const found = findTextPartPath(bs.childNodes[i], want, childPart);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+async function downloadUidPart(
+  client: ImapFlow,
+  uid: number,
+  partPath: string,
+): Promise<string | undefined> {
+  try {
+    const part = await client.download(String(uid), partPath, { uid: true });
+    if (!part?.content) return undefined;
+    const chunks: Buffer[] = [];
+    // eslint-disable-next-line no-restricted-syntax
+    for await (const chunk of part.content) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks).toString('utf-8');
+  } catch {
+    return undefined;
+  }
 }
 
 function hasAttachments(bodyStructure: unknown): boolean {
@@ -181,25 +236,30 @@ async function messageToEmail(
     }
   }
 
-  // Try to get text/html parts via download if body parsing was simple
-  try {
-    const textPart = await client.download(String(uid), '1', { uid: true });
-    if (textPart?.content) {
-      const chunks: Buffer[] = [];
-      // eslint-disable-next-line no-restricted-syntax
-      for await (const chunk of textPart.content) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      bodyText = Buffer.concat(chunks).toString('utf-8');
-    }
-  } catch {
-    // Part may not exist
+  // Prefer dedicated MIME parts for text/plain and text/html (multipart/alternative).
+  const plainPath = findTextPartPath(msg.bodyStructure, 'text/plain');
+  const htmlPath = findTextPartPath(msg.bodyStructure, 'text/html');
+  if (plainPath) {
+    const plain = await downloadUidPart(client, uid, plainPath);
+    if (plain !== undefined) bodyText = plain;
+  }
+  if (htmlPath) {
+    const html = await downloadUidPart(client, uid, htmlPath);
+    if (html !== undefined) bodyHtml = html;
+  }
+  // Legacy fallback: part "1" as plain when structure had no typed parts.
+  if (bodyText === undefined && bodyHtml === undefined) {
+    const fallback = await downloadUidPart(client, uid, '1');
+    if (fallback !== undefined) bodyText = fallback;
   }
 
   return {
     ...meta,
     cc: parseAddresses(envelope.cc as Record<string, string>[]),
     bcc: parseAddresses(envelope.bcc as Record<string, string>[]),
+    replyTo: envelope.replyTo
+      ? parseAddresses(envelope.replyTo as Record<string, string>[])
+      : undefined,
     bodyText,
     bodyHtml,
     messageId: (envelope.messageId as string) ?? '',
@@ -1014,8 +1074,11 @@ export default class ImapService {
       bcc?: string[];
       html?: boolean;
       inReplyTo?: string;
+      attachments?: AttachmentInput[];
     },
   ): Promise<{ id: number; mailbox: string }> {
+    await validateAttachments(options.attachments);
+
     const client = await this.connections.getImapClient(accountName);
     const account = this.connections.getAccount(accountName);
 
@@ -1024,32 +1087,66 @@ export default class ImapService {
     const drafts = mailboxes.find((mb) => mb.specialUse === '\\Drafts');
     const draftsPath = drafts?.path ?? 'Drafts';
 
-    // Construct RFC 822 message
-    const headers = [
-      `From: ${account.fullName ? `"${account.fullName}" <${account.email}>` : account.email}`,
-      `To: ${options.to.join(', ')}`,
-      `Subject: ${options.subject}`,
-      `Date: ${new Date().toUTCString()}`,
-      `MIME-Version: 1.0`,
-    ];
+    const attachments = await resolveAttachments(options.attachments);
+    const rawMessage = await buildRawMessage({
+      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      to: options.to.join(', '),
+      cc: options.cc?.join(', '),
+      bcc: options.bcc?.join(', '),
+      subject: options.subject,
+      inReplyTo: options.inReplyTo,
+      attachments,
+      ...(options.html ? { html: options.body } : { text: options.body }),
+    });
 
-    if (options.cc?.length) headers.push(`Cc: ${options.cc.join(', ')}`);
-    if (options.bcc?.length) headers.push(`Bcc: ${options.bcc.join(', ')}`);
-    if (options.inReplyTo) headers.push(`In-Reply-To: ${options.inReplyTo}`);
-
-    const contentType = options.html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8';
-    headers.push(`Content-Type: ${contentType}`);
-
-    const rawMessage = `${headers.join('\r\n')}\r\n\r\n${options.body}`;
-
-    const appendResult = await client.append(draftsPath, Buffer.from(rawMessage), [
-      '\\Draft',
-      '\\Seen',
-    ]);
+    const appendResult = await client.append(draftsPath, rawMessage, ['\\Draft', '\\Seen']);
 
     return {
       id: (appendResult as unknown as { uid?: number }).uid ?? 0,
       mailbox: draftsPath,
+    };
+  }
+
+  /**
+   * Reply to an existing message and store the reply in Drafts without sending.
+   * Threading headers, "Re:" subject, recipients and the quoted original are
+   * derived from the original message like a mail client's Reply button.
+   */
+  async saveReplyDraft(
+    accountName: string,
+    options: Omit<ReplyDraftOptions, 'attachments'> & {
+      emailId: string;
+      mailbox?: string;
+      attachments?: AttachmentInput[];
+    },
+  ): Promise<{
+    id: number;
+    mailbox: string;
+    subject: string;
+    to: string[];
+    cc: string[];
+    inReplyTo: string;
+  }> {
+    await validateAttachments(options.attachments);
+    const original = await this.getEmail(accountName, options.emailId, options.mailbox);
+    const account = this.connections.getAccount(accountName);
+    const attachments = await resolveAttachments(options.attachments);
+    const draft = await buildReplyDraft(account, original, { ...options, attachments });
+
+    const client = await this.connections.getImapClient(accountName);
+    const mailboxes = await client.list();
+    const drafts = mailboxes.find((mb) => mb.specialUse === '\\Drafts');
+    const draftsPath = drafts?.path ?? 'Drafts';
+
+    const appendResult = await client.append(draftsPath, draft.raw, ['\\Draft', '\\Seen']);
+
+    return {
+      id: (appendResult as unknown as { uid?: number }).uid ?? 0,
+      mailbox: draftsPath,
+      subject: draft.subject,
+      to: draft.to.map((a) => a.address),
+      cc: draft.cc.map((a) => a.address),
+      inReplyTo: original.messageId,
     };
   }
 

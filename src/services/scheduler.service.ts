@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { SCHEDULED_DIR, SCHEDULED_SENT_DIR } from '../config/xdg.js';
-import type { ScheduledEmail } from '../types/index.js';
+import type { AttachmentInput, ScheduledEmail } from '../types/index.js';
 import type ImapService from './imap.service.js';
 import type SmtpService from './smtp.service.js';
 
@@ -42,6 +42,7 @@ export default class SchedulerService {
       html?: boolean;
       inReplyTo?: string;
       references?: string[];
+      attachments?: AttachmentInput[];
     },
   ): Promise<ScheduledEmail> {
     const sendAtDate = new Date(options.sendAt);
@@ -67,6 +68,7 @@ export default class SchedulerService {
       attempts: 0,
       inReplyTo: options.inReplyTo,
       references: options.references,
+      attachments: options.attachments,
     };
 
     // Save IMAP draft (best-effort)
@@ -77,6 +79,7 @@ export default class SchedulerService {
         body: options.body,
         cc: options.cc,
         html: options.html,
+        attachments: options.attachments,
       });
       scheduled.draftMessageId = String(draftResult.id);
       scheduled.draftMailbox = draftResult.mailbox;
@@ -237,6 +240,7 @@ export default class SchedulerService {
           cc: scheduled.cc,
           bcc: scheduled.bcc,
           html: scheduled.html,
+          attachments: scheduled.attachments,
         });
 
         // Mark as sent and move to sent dir

@@ -8,7 +8,7 @@
 
 An MCP (Model Context Protocol) server providing comprehensive email capabilities via IMAP and SMTP.
 
-Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 47 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
+Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 48 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
 
 ## Highlights
 
@@ -642,7 +642,7 @@ Features:
 
 ## API
 
-### Tools (47)
+### Tools (48)
 
 #### Read (14)
 
@@ -663,7 +663,7 @@ Features:
 | `get_email_stats` | Email analytics — volume, top senders, daily trends |
 | `check_health` | Connection health, latency, quota, and IMAP capabilities |
 
-#### Write (9)
+#### Write (10)
 
 | Tool | Description |
 |------|-------------|
@@ -671,6 +671,7 @@ Features:
 | `reply_email` | Reply with proper threading (In-Reply-To, References) |
 | `forward_email` | Forward with original content quoted |
 | `save_draft` | Save an email draft to the Drafts folder |
+| `reply_draft` | Reply to an email as a draft in the Drafts folder (threading, `Re:`, quoted original) — nothing is sent |
 | `send_draft` | Send an existing draft and remove from Drafts |
 | `apply_template` | Apply a template with variable substitution |
 | `schedule_email` | Schedule an email for future delivery |

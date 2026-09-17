@@ -186,6 +186,7 @@ export interface AttachmentMeta {
 export interface Email extends EmailMeta {
   cc?: EmailAddress[];
   bcc?: EmailAddress[];
+  replyTo?: EmailAddress[];
   bodyText?: string;
   bodyHtml?: string;
   messageId: string;
@@ -193,6 +194,21 @@ export interface Email extends EmailMeta {
   references?: string[];
   attachments: AttachmentMeta[];
   headers: Record<string, string>;
+}
+
+// ---------------------------------------------------------------------------
+// Outgoing attachments
+// ---------------------------------------------------------------------------
+
+/**
+ * A file to attach to an outgoing email (send, reply, forward, or draft).
+ * Provide exactly one of `content` (base64) or `path` (local file path).
+ */
+export interface AttachmentInput {
+  filename: string;
+  content?: string;
+  path?: string;
+  contentType?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +388,7 @@ export interface ScheduledEmail {
   draftMailbox?: string;
   inReplyTo?: string;
   references?: string[];
+  attachments?: AttachmentInput[];
   sentAt?: string;
   sentMessageId?: string;
 }

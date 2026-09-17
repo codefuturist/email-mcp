@@ -124,5 +124,128 @@ describe('SmtpService', () => {
       expect(call.html).toBe('<h1>Hello</h1>');
       expect(call.text).toBeUndefined();
     });
+
+    it('decodes and sends base64 attachments', async () => {
+      await service.sendEmail('test', {
+        to: ['a@example.com'],
+        subject: 'With attachment',
+        body: 'See attached',
+        attachments: [
+          {
+            filename: 'note.txt',
+            content: Buffer.from('hello').toString('base64'),
+            contentType: 'text/plain',
+          },
+        ],
+      });
+
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(call.attachments).toEqual([
+        { filename: 'note.txt', content: Buffer.from('hello'), contentType: 'text/plain' },
+      ]);
+    });
+
+    it('rejects invalid attachments before sending', async () => {
+      await expect(
+        service.sendEmail('test', {
+          to: ['a@example.com'],
+          subject: 'Bad attachment',
+          body: 'oops',
+          attachments: [{ filename: 'note.txt' }],
+        }),
+      ).rejects.toThrow('exactly one of "content"');
+
+      expect(transport.sendMail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('replyToEmail', () => {
+    it('passes resolved attachments to sendMail', async () => {
+      const imapService = {
+        getEmail: vi.fn().mockResolvedValue({
+          id: '1',
+          subject: 'Hello',
+          from: { address: 'sender@example.com' },
+          to: [{ address: 'test@example.com' }],
+          date: new Date().toISOString(),
+          bodyText: 'Original',
+          messageId: '<orig@example.com>',
+          attachments: [],
+        }),
+      } as unknown as ImapService;
+      service = new SmtpService(connections, rateLimiter, imapService);
+
+      await service.replyToEmail('test', {
+        emailId: '1',
+        body: 'Thanks',
+        attachments: [
+          {
+            filename: 'note.txt',
+            content: Buffer.from('hi').toString('base64'),
+            contentType: 'text/plain',
+          },
+        ],
+      });
+
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(call.attachments).toEqual([
+        { filename: 'note.txt', content: Buffer.from('hi'), contentType: 'text/plain' },
+      ]);
+    });
+  });
+
+  describe('forwardEmail', () => {
+    function createMockImapServiceWithEmail(
+      attachments: { filename: string; mimeType: string; size: number }[],
+    ) {
+      return {
+        getEmail: vi.fn().mockResolvedValue({
+          id: '1',
+          subject: 'Original',
+          from: { address: 'sender@example.com' },
+          to: [{ address: 'test@example.com' }],
+          date: new Date().toISOString(),
+          bodyText: 'Original body',
+          attachments,
+        }),
+        downloadAttachment: vi.fn().mockResolvedValue({
+          filename: 'report.pdf',
+          mimeType: 'application/pdf',
+          size: 3,
+          contentBase64: Buffer.from('pdf').toString('base64'),
+        }),
+      } as unknown as ImapService;
+    }
+
+    it('does not include original attachments by default', async () => {
+      const imapService = createMockImapServiceWithEmail([
+        { filename: 'report.pdf', mimeType: 'application/pdf', size: 3 },
+      ]);
+      service = new SmtpService(connections, rateLimiter, imapService);
+
+      await service.forwardEmail('test', { emailId: '1', to: ['dest@example.com'] });
+
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(call.attachments).toEqual([]);
+      expect(imapService.downloadAttachment).not.toHaveBeenCalled();
+    });
+
+    it('re-attaches original attachments when includeOriginalAttachments is true', async () => {
+      const imapService = createMockImapServiceWithEmail([
+        { filename: 'report.pdf', mimeType: 'application/pdf', size: 3 },
+      ]);
+      service = new SmtpService(connections, rateLimiter, imapService);
+
+      await service.forwardEmail('test', {
+        emailId: '1',
+        to: ['dest@example.com'],
+        includeOriginalAttachments: true,
+      });
+
+      const call = transport.sendMail.mock.calls[0][0];
+      expect(call.attachments).toEqual([
+        { filename: 'report.pdf', content: Buffer.from('pdf'), contentType: 'application/pdf' },
+      ]);
+    });
   });
 });

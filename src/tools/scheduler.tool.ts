@@ -9,6 +9,7 @@ import { z } from 'zod';
 import audit from '../safety/audit.js';
 
 import type SchedulerService from '../services/scheduler.service.js';
+import attachmentsSchema from './attachment-input.schema.js';
 
 export default function registerSchedulerTools(
   server: McpServer,
@@ -20,7 +21,7 @@ export default function registerSchedulerTools(
 
   server.tool(
     'schedule_email',
-    'Schedule an email to be sent at a specific time in the future. The email is queued locally and sent automatically when the time arrives.',
+    'Schedule an email to be sent at a specific time in the future. Supports file attachments. The email is queued locally and sent automatically when the time arrives.',
     {
       account: z.string().describe('Account name to send from'),
       to: z.array(z.string()).min(1).describe('Recipient email addresses'),
@@ -31,6 +32,7 @@ export default function registerSchedulerTools(
       bcc: z.array(z.string()).optional().describe('BCC recipients'),
       html: z.boolean().default(false).describe('Send as HTML (default: false)'),
       in_reply_to: z.string().optional().describe('Message-ID to reply to'),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false },
     async (params) => {
@@ -43,6 +45,7 @@ export default function registerSchedulerTools(
         bcc: params.bcc,
         html: params.html,
         inReplyTo: params.in_reply_to,
+        attachments: params.attachments,
       });
 
       const result = {

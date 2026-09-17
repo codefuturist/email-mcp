@@ -8,6 +8,7 @@ import audit from '../safety/audit.js';
 import { validateInputLength } from '../safety/validation.js';
 
 import type SmtpService from '../services/smtp.service.js';
+import attachmentsSchema from './attachment-input.schema.js';
 
 export default function registerSendTools(server: McpServer, smtpService: SmtpService): void {
   // ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
   // ---------------------------------------------------------------------------
   server.tool(
     'send_email',
-    'Send a new email. Supports plain text or HTML body, CC, and BCC.',
+    'Send a new email. Supports plain text or HTML body, CC, BCC, and file attachments.',
     {
       account: z.string().describe('Account name from list_accounts'),
       to: z.array(z.string().email()).min(1).describe('Recipient email addresses'),
@@ -24,6 +25,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       cc: z.array(z.string().email()).optional().describe('CC recipients'),
       bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
       html: z.boolean().default(false).describe('Send as HTML (default: plain text)'),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
@@ -72,14 +74,19 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
   // ---------------------------------------------------------------------------
   server.tool(
     'reply_email',
-    'Reply to an email with proper threading (In-Reply-To & References headers). Use get_email first to read the original.',
+    'Reply to an email with proper threading (In-Reply-To & References headers) and send it immediately via SMTP. Quotes the original under a Mailbird-compatible history_container (HTML preserved). Supports file attachments. To prepare a reply for the user to review first, use reply_draft instead. Use get_email first to read the original.',
     {
       account: z.string().describe('Account name from list_accounts'),
       emailId: z.string().describe('Email ID to reply to (from list_emails or get_email)'),
       mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
-      body: z.string().describe('Reply body content'),
+      body: z.string().describe('Reply body content (placed above the quoted original)'),
       replyAll: z.boolean().default(false).describe('Reply to all recipients'),
-      html: z.boolean().default(false).describe('Send as HTML'),
+      html: z.boolean().default(false).describe('Body is HTML (default: plain text)'),
+      quoteOriginal: z
+        .boolean()
+        .default(true)
+        .describe('Quote the original message below the body (Mailbird history_container)'),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
@@ -126,7 +133,7 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
   // ---------------------------------------------------------------------------
   server.tool(
     'forward_email',
-    'Forward an email to new recipients with optional additional message. Original email is quoted below.',
+    'Forward an email to new recipients with optional additional message. Original email is quoted below. Supports file attachments and optionally re-attaching the original email attachments.',
     {
       account: z.string().describe('Account name from list_accounts'),
       emailId: z.string().describe('Email ID to forward (from list_emails or get_email)'),
@@ -134,6 +141,11 @@ export default function registerSendTools(server: McpServer, smtpService: SmtpSe
       to: z.array(z.string().email()).min(1).describe('Forward to these recipients'),
       body: z.string().optional().describe('Additional message above the forwarded content'),
       cc: z.array(z.string().email()).optional().describe('CC recipients'),
+      includeOriginalAttachments: z
+        .boolean()
+        .default(false)
+        .describe("Re-attach the original email's own attachments to the forward"),
+      attachments: attachmentsSchema,
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async (params) => {
