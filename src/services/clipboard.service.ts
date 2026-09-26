@@ -114,6 +114,17 @@ export default class ClipboardService {
 
   constructor(opts: { platform?: NodeJS.Platform } = {}) {
     this.platform = opts.platform ?? process.platform;
+    this.rateResetTimer = null;
+    this.ensureRateTimer();
+  }
+
+  /**
+   * (Re)arm the rate-limit reset interval. Self-healing: stop() clears it
+   * (e.g. when the verification catcher is disabled at runtime), and a later
+   * re-enable must not leave writes permanently rate-limited.
+   */
+  private ensureRateTimer(): void {
+    if (this.rateResetTimer) return;
     this.rateResetTimer = setInterval(() => {
       this.writeCount = 0;
     }, 60_000);
@@ -140,6 +151,7 @@ export default class ClipboardService {
     text: string,
     opts: { clearAfterSeconds?: number } = {},
   ): Promise<ClipboardWriteResult> {
+    this.ensureRateTimer();
     if (this.writeCount >= MAX_WRITES_PER_MIN) {
       return { ok: false, concealed: false, error: 'clipboard write rate limit exceeded' };
     }

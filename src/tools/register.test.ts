@@ -105,6 +105,7 @@ describe('registerAllTools', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     // Read tools should always be registered
     expect(registerAccountsTools).toHaveBeenCalled();
@@ -128,6 +129,7 @@ describe('registerAllTools', () => {
       {} as never,
       {} as never,
       createConfig(true),
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

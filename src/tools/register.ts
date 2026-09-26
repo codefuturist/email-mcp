@@ -16,6 +16,7 @@ import type RemindersService from '../services/reminders.service.js';
 import type SchedulerService from '../services/scheduler.service.js';
 import type SmtpService from '../services/smtp.service.js';
 import type TemplateService from '../services/template.service.js';
+import type VerificationCatcherService from '../services/verification-catcher.service.js';
 import type WatcherService from '../services/watcher.service.js';
 import type { AppConfig } from '../types/index.js';
 import registerAccountsTools from './accounts.tool.js';
@@ -53,6 +54,7 @@ export default function registerAllTools(
   watcherService: WatcherService,
   hooksService: HooksService,
   clipboardService: ClipboardService,
+  verificationCatcher: VerificationCatcherService,
 ): void {
   const { readOnly } = config.settings;
 
@@ -77,7 +79,14 @@ export default function registerAllTools(
   registerWatcherTools(server, watcherService, hooksService);
   // Clipboard copy is a local convenience, not a mailbox write — registered
   // in read-only mode too (same reasoning as test_notification).
-  registerVerificationTools(server, imapService, config, watcherService, clipboardService);
+  registerVerificationTools(
+    server,
+    imapService,
+    config,
+    watcherService,
+    clipboardService,
+    verificationCatcher,
+  );
 
   // Write tools — skipped in read-only mode
   if (!readOnly) {

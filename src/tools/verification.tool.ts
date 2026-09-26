@@ -10,13 +10,50 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
+import { loadRawConfig, saveConfigValidated } from '../config/loader.js';
+import type { VerificationConfigSchema } from '../config/schema.js';
 import type ClipboardService from '../services/clipboard.service.js';
 import ClipboardServiceClass from '../services/clipboard.service.js';
 import type ImapService from '../services/imap.service.js';
+import type VerificationCatcherService from '../services/verification-catcher.service.js';
 import { waitForVerification } from '../services/verification-catcher.service.js';
 import type WatcherService from '../services/watcher.service.js';
-import type { AppConfig } from '../types/index.js';
+import type { AppConfig, VerificationConfig } from '../types/index.js';
 import { verificationOutputSchema } from './schemas.js';
+
+/** camelCase runtime config → snake_case raw section (persist path). */
+export function verificationToRaw(v: VerificationConfig): z.infer<typeof VerificationConfigSchema> {
+  return {
+    enabled: v.enabled,
+    auto_copy: v.autoCopy,
+    confirm_copy: v.confirmCopy,
+    notify: v.notify,
+    copy_links: v.copyLinks,
+    link_action: v.linkAction,
+    clear_after_seconds: v.clearAfterSeconds,
+    max_age_minutes: v.maxAgeMinutes,
+    accounts: v.accounts,
+    sender_allowlist: v.senderAllowlist,
+    sender_denylist: v.senderDenylist,
+  };
+}
+
+function renderVerification(v: VerificationConfig): string[] {
+  return [
+    '[settings.verification]',
+    `  enabled = ${v.enabled}`,
+    `  auto_copy = ${v.autoCopy}`,
+    `  confirm_copy = ${v.confirmCopy}`,
+    `  notify = ${v.notify}`,
+    `  copy_links = ${v.copyLinks}`,
+    `  link_action = "${v.linkAction}"`,
+    `  clear_after_seconds = ${v.clearAfterSeconds}`,
+    `  max_age_minutes = ${v.maxAgeMinutes}`,
+    `  accounts = ${v.accounts.length > 0 ? v.accounts.join(', ') : '(all)'}`,
+    `  sender_allowlist = ${v.senderAllowlist.length > 0 ? v.senderAllowlist.join(', ') : '(all senders)'}`,
+    `  sender_denylist = ${v.senderDenylist.length > 0 ? v.senderDenylist.join(', ') : '(none)'}`,
+  ];
+}
 
 export default function registerVerificationTools(
   server: McpServer,
@@ -24,6 +61,7 @@ export default function registerVerificationTools(
   config: AppConfig,
   watcherService: WatcherService,
   clipboardService: ClipboardService,
+  verificationCatcher: VerificationCatcherService,
 ): void {
   const verification = config.settings.verification;
 
@@ -276,6 +314,158 @@ export default function registerVerificationTools(
             {
               type: 'text' as const,
               text: `Clipboard diagnostics failed: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // configure_verification
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    'configure_verification',
+    {
+      title: 'Configure verification catching',
+      description:
+        'Update [settings.verification] at runtime — changes take effect immediately, ' +
+        'including starting/stopping the ambient catcher via `enabled`. ' +
+        'Use save=true to persist to config.toml (previous file is backed up). ' +
+        'Omit every field to see the current configuration. ' +
+        'Registered in read-only mode too: this writes config, never the mailbox.',
+      inputSchema: z.object({
+        enabled: z.boolean().optional().describe('Master switch for verification catching'),
+        auto_copy: z.boolean().optional().describe('Copy caught codes/links to the clipboard'),
+        confirm_copy: z
+          .boolean()
+          .optional()
+          .describe('Ask (native dialog) before touching the clipboard'),
+        notify: z.boolean().optional().describe('Desktop notification when something is caught'),
+        copy_links: z.boolean().optional().describe('Also catch sign-in magic links'),
+        link_action: z
+          .enum(['open', 'copy'])
+          .optional()
+          .describe('Caught links: offer to open in the browser, or copy like a code'),
+        clear_after_seconds: z
+          .number()
+          .int()
+          .min(0)
+          .max(3600)
+          .optional()
+          .describe('Auto-clear clipboard after N seconds (0 = never)'),
+        max_age_minutes: z
+          .number()
+          .int()
+          .min(1)
+          .max(1440)
+          .optional()
+          .describe('Ignore messages older than this'),
+        accounts: z.array(z.string()).optional().describe('Accounts to watch (empty array = all)'),
+        sender_allowlist: z
+          .array(z.string())
+          .optional()
+          .describe('Sender globs, e.g. ["*@github.com"] (empty = all senders)'),
+        sender_denylist: z.array(z.string()).optional().describe('Sender globs to ignore'),
+        save: z
+          .boolean()
+          .default(false)
+          .describe('Persist changes to config.toml (default: runtime only)'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (params) => {
+      try {
+        const partial: Partial<VerificationConfig> = {};
+        if (params.enabled !== undefined) partial.enabled = params.enabled;
+        if (params.auto_copy !== undefined) partial.autoCopy = params.auto_copy;
+        if (params.confirm_copy !== undefined) partial.confirmCopy = params.confirm_copy;
+        if (params.notify !== undefined) partial.notify = params.notify;
+        if (params.copy_links !== undefined) partial.copyLinks = params.copy_links;
+        if (params.link_action !== undefined) partial.linkAction = params.link_action;
+        if (params.clear_after_seconds !== undefined) {
+          partial.clearAfterSeconds = params.clear_after_seconds;
+        }
+        if (params.max_age_minutes !== undefined) partial.maxAgeMinutes = params.max_age_minutes;
+        if (params.accounts !== undefined) partial.accounts = params.accounts;
+        if (params.sender_allowlist !== undefined) {
+          partial.senderAllowlist = params.sender_allowlist;
+        }
+        if (params.sender_denylist !== undefined) partial.senderDenylist = params.sender_denylist;
+
+        if (Object.keys(partial).length === 0) {
+          const watcherActive = watcherService.getStatus().length > 0;
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: [
+                  'No changes specified. Current config:',
+                  ...renderVerification(verification),
+                  '',
+                  `Watcher: ${watcherActive ? '✅ active' : '❌ not running (ambient catching inactive)'}`,
+                ].join('\n'),
+              },
+            ],
+          };
+        }
+
+        const prevEnabled = verification.enabled;
+        // Mutate in place — `verification` is the same object instance the
+        // catcher holds (identity contract); reassigning would silently
+        // detach runtime behavior from this tool.
+        Object.assign(verification, partial);
+
+        const lines = [
+          '✅ Verification configuration updated:',
+          ...renderVerification(verification),
+        ];
+
+        if (partial.enabled !== undefined && partial.enabled !== prevEnabled) {
+          if (partial.enabled) {
+            verificationCatcher.start();
+            lines.push('', '▶️ Ambient catcher started.');
+            if (watcherService.getStatus().length === 0) {
+              lines.push(
+                '⚠️ The IMAP watcher is not running — ambient auto-copy stays inactive until',
+                '   [settings.watcher] enabled = true and the server restarts.',
+                '   (get_verification_code works either way.)',
+              );
+            }
+          } else {
+            verificationCatcher.stop();
+            lines.push('', '⏸️ Ambient catcher stopped.');
+          }
+        }
+
+        if (params.save) {
+          try {
+            const rawConfig = await loadRawConfig();
+            rawConfig.settings.verification = verificationToRaw(verification);
+            const saved = await saveConfigValidated(rawConfig);
+            lines.push(
+              '',
+              `💾 Changes saved to config file.${saved.backupPath ? ` (backup: ${saved.backupPath})` : ''}`,
+            );
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            lines.push(
+              '',
+              `⚠️ Could not save to config file: ${errMsg}`,
+              '   Changes are active for this session only.',
+            );
+          }
+        }
+
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: `Failed to update verification config: ${err instanceof Error ? err.message : String(err)}`,
             },
           ],
         };

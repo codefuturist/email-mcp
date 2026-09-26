@@ -328,6 +328,7 @@ skip('add_to_calendar', 'writes to the real macOS Calendar');
 skip('create_reminder', 'writes to the real macOS Reminders');
 skip('test_notification', 'fires a desktop notification');
 skip('configure_alerts', 'mutates runtime hook configuration');
+skip('configure_verification', 'mutates runtime verification configuration');
 skip('send_draft', 'consumes the saved draft; covered by integration suite');
 
 // ---------------------------------------------------------------------------

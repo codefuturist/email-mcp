@@ -148,6 +148,7 @@ export function buildServer(services: AppServices): McpServer {
     services.watcherService,
     services.hooksService,
     services.clipboardService,
+    services.verificationCatcher,
   );
   registerAllResources(
     server,

@@ -130,6 +130,23 @@ describe('ClipboardService', () => {
       vi.useRealTimers();
     });
 
+    it('recovers rate limiting after stop() and restart (enabled toggle cycle)', async () => {
+      vi.useFakeTimers();
+      clipboard.stop();
+
+      for (let i = 0; i < 12; i += 1) {
+        await clipboard.copyConcealed(`code${i}`, { clearAfterSeconds: 0 });
+      }
+      expect(spawnsOf('osascript')).toHaveLength(10);
+
+      await vi.advanceTimersByTimeAsync(61_000);
+      const after = await clipboard.copyConcealed('fresh', { clearAfterSeconds: 0 });
+
+      expect(after.ok).toBe(true);
+      expect(spawnsOf('osascript')).toHaveLength(11);
+      vi.useRealTimers();
+    });
+
     it('rate-limits clipboard writes', async () => {
       for (let i = 0; i < 12; i += 1) {
         await clipboard.copyConcealed(`code${i}`, { clearAfterSeconds: 0 });
