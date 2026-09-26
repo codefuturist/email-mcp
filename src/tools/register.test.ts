@@ -41,6 +41,17 @@ function createConfig(readOnly: boolean): AppConfig {
     settings: {
       rateLimit: 10,
       readOnly,
+      verification: {
+        enabled: true,
+        autoCopy: true,
+        notify: true,
+        copyLinks: true,
+        clearAfterSeconds: 60,
+        maxAgeMinutes: 10,
+        accounts: [],
+        senderAllowlist: [],
+        senderDenylist: [],
+      },
       cache: {
         enabled: true,
         mailboxes: ['INBOX'],

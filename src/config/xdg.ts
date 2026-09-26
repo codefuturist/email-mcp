@@ -48,6 +48,9 @@ export const CALENDAR_ATTACHMENTS_DIR = path.join(xdg.data, 'calendar-attachment
 /** JSON state file tracking which emails have been auto-processed for calendar/reminders */
 export const CALENDAR_STATE_FILE = path.join(xdg.state, 'calendar-processed.json');
 
+/** JSON state file tracking which emails the verification catcher already scanned */
+export const VERIFICATION_STATE_FILE = path.join(xdg.state, 'verification-processed.json');
+
 /**
  * Local mirror of server-side mail (envelopes, flags, bodies, search index).
  *

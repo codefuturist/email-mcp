@@ -499,6 +499,17 @@ async function addAccount(): Promise<void> {
         settings: {
           rate_limit: 10,
           read_only: false,
+          verification: {
+            enabled: true,
+            auto_copy: true,
+            notify: true,
+            copy_links: true,
+            clear_after_seconds: 60,
+            max_age_minutes: 10,
+            accounts: [],
+            sender_allowlist: [],
+            sender_denylist: [],
+          },
           cache: {
             enabled: true,
             mailboxes: ['INBOX'],

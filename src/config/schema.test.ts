@@ -127,6 +127,36 @@ describe('SettingsSchema', () => {
   });
 });
 
+describe('verification settings', () => {
+  const expectedDefaults = {
+    enabled: true,
+    auto_copy: true,
+    notify: true,
+    copy_links: true,
+    clear_after_seconds: 60,
+    max_age_minutes: 10,
+    accounts: [],
+    sender_allowlist: [],
+    sender_denylist: [],
+  };
+
+  it('applies verification defaults via SettingsSchema', () => {
+    const result = SettingsSchema.parse({});
+    expect(result.verification).toEqual(expectedDefaults);
+  });
+
+  // Guards the duplicated default literal in AppConfigFileSchema — the two
+  // blocks must stay in lockstep.
+  it('applies verification defaults when settings is absent entirely', () => {
+    const result = AppConfigFileSchema.parse({ accounts: [validAccount()] });
+    expect(result.settings.verification).toEqual(expectedDefaults);
+  });
+
+  it('rejects clear_after_seconds beyond one hour', () => {
+    expect(() => SettingsSchema.parse({ verification: { clear_after_seconds: 3601 } })).toThrow();
+  });
+});
+
 describe('AppConfigFileSchema', () => {
   it('accepts valid config with one account', () => {
     const result = AppConfigFileSchema.parse({ accounts: [validAccount()] });

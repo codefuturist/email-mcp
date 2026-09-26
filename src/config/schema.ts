@@ -136,9 +136,46 @@ export const CacheConfigSchema = z.object({
   sync_interval: z.number().int().min(30).default(300),
 });
 
+/**
+ * Verification-code / magic-link catching.
+ *
+ * The feature itself defaults on, but the ambient auto-copy path only runs
+ * while the IMAP IDLE watcher is enabled (`[settings.watcher]`), which
+ * defaults off — enabling the watcher is the consent moment.
+ */
+export const VerificationConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** Copy a caught code/link to the clipboard automatically. */
+  auto_copy: z.boolean().default(true),
+  /** Show a desktop notification when something is caught. */
+  notify: z.boolean().default(true),
+  /** Also catch sign-in magic links (used only when no code is found). */
+  copy_links: z.boolean().default(true),
+  /** Clear the clipboard after N seconds if it still holds our value. 0 = never. */
+  clear_after_seconds: z.number().int().min(0).max(3600).default(60),
+  /** Ignore messages older than this when they surface (IDLE replays, reconnects). */
+  max_age_minutes: z.number().int().min(1).max(1440).default(10),
+  /** Accounts to watch (empty = all). */
+  accounts: z.array(z.string()).default([]),
+  /** Sender globs (hooks syntax). Empty allowlist = all senders. */
+  sender_allowlist: z.array(z.string()).default([]),
+  sender_denylist: z.array(z.string()).default([]),
+});
+
 export const SettingsSchema = z.object({
   rate_limit: z.number().int().min(1).default(10),
   read_only: z.boolean().default(false),
+  verification: VerificationConfigSchema.default({
+    enabled: true,
+    auto_copy: true,
+    notify: true,
+    copy_links: true,
+    clear_after_seconds: 60,
+    max_age_minutes: 10,
+    accounts: [],
+    sender_allowlist: [],
+    sender_denylist: [],
+  }),
   cache: CacheConfigSchema.default({
     enabled: true,
     mailboxes: ['INBOX'],
@@ -177,6 +214,17 @@ export const AppConfigFileSchema = z.object({
   settings: SettingsSchema.default({
     rate_limit: 10,
     read_only: false,
+    verification: {
+      enabled: true,
+      auto_copy: true,
+      notify: true,
+      copy_links: true,
+      clear_after_seconds: 60,
+      max_age_minutes: 10,
+      accounts: [],
+      sender_allowlist: [],
+      sender_denylist: [],
+    },
     cache: {
       enabled: true,
       mailboxes: ['INBOX'],

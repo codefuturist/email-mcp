@@ -168,6 +168,57 @@ read_only = true
   });
 
   // -------------------------------------------------------------------------
+  // verification settings
+  // -------------------------------------------------------------------------
+
+  describe('verification settings', () => {
+    it('normalizes [settings.verification] to camelCase', async () => {
+      const toml = `${MINIMAL_TOML}
+[settings.verification]
+auto_copy = false
+clear_after_seconds = 30
+sender_allowlist = ["*@github.com"]
+`;
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, toml, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.verification.autoCopy).toBe(false);
+      expect(config.settings.verification.clearAfterSeconds).toBe(30);
+      expect(config.settings.verification.senderAllowlist).toEqual(['*@github.com']);
+      expect(config.settings.verification.enabled).toBe(true);
+    });
+
+    it('applies verification defaults when the section is absent', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.verification.enabled).toBe(true);
+      expect(config.settings.verification.autoCopy).toBe(true);
+      expect(config.settings.verification.copyLinks).toBe(true);
+      expect(config.settings.verification.maxAgeMinutes).toBe(10);
+      expect(config.settings.verification.accounts).toEqual([]);
+    });
+
+    it('treats MCP_EMAIL_VERIFICATION_ENABLED=false as an opt-out', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_PASSWORD = 'env-pass';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+      process.env.MCP_EMAIL_VERIFICATION_ENABLED = 'false';
+      process.env.MCP_EMAIL_VERIFICATION_CLEAR_AFTER_SECONDS = '90';
+
+      const config = await loadConfig(path.join(tmpDir, 'nonexistent.toml'));
+
+      expect(config.settings.verification.enabled).toBe(false);
+      expect(config.settings.verification.clearAfterSeconds).toBe(90);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // saveConfig
   // -------------------------------------------------------------------------
 
@@ -235,6 +286,7 @@ read_only = true
       expect(template).toContain('[accounts.smtp]');
       expect(template).toContain('[settings]');
       expect(template).toContain('rate_limit');
+      expect(template).toContain('[settings.verification]');
     });
   });
 });

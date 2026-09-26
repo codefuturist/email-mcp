@@ -137,6 +137,19 @@ export interface HooksConfig {
   calendarConfirm?: boolean;
 }
 
+/** Verification-code / magic-link catching — see VerificationConfigSchema. */
+export interface VerificationConfig {
+  enabled: boolean;
+  autoCopy: boolean;
+  notify: boolean;
+  copyLinks: boolean;
+  clearAfterSeconds: number;
+  maxAgeMinutes: number;
+  accounts: string[];
+  senderAllowlist: string[];
+  senderDenylist: string[];
+}
+
 /** Local mirror settings — see CacheConfigSchema for defaults and rationale. */
 export interface CacheConfig {
   enabled: boolean;
@@ -151,6 +164,7 @@ export interface AppConfig {
   settings: {
     rateLimit: number;
     readOnly: boolean;
+    verification: VerificationConfig;
     cache: CacheConfig;
     watcher: WatcherConfig;
     hooks: HooksConfig;

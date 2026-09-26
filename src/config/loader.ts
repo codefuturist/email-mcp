@@ -46,6 +46,31 @@ function loadFromEnv(): RawAppConfig | null {
     settings: {
       rate_limit: parseInt(process.env.MCP_EMAIL_RATE_LIMIT ?? '10', 10),
       read_only: process.env.MCP_EMAIL_READ_ONLY === 'true',
+      verification: {
+        // Opt-out like cache: the feature is inert until the watcher runs,
+        // and the on-demand tool is read-only unless asked to copy.
+        enabled: process.env.MCP_EMAIL_VERIFICATION_ENABLED !== 'false',
+        auto_copy: process.env.MCP_EMAIL_VERIFICATION_AUTO_COPY !== 'false',
+        notify: process.env.MCP_EMAIL_VERIFICATION_NOTIFY !== 'false',
+        copy_links: process.env.MCP_EMAIL_VERIFICATION_COPY_LINKS !== 'false',
+        clear_after_seconds: parseInt(
+          process.env.MCP_EMAIL_VERIFICATION_CLEAR_AFTER_SECONDS ?? '60',
+          10,
+        ),
+        max_age_minutes: parseInt(process.env.MCP_EMAIL_VERIFICATION_MAX_AGE_MINUTES ?? '10', 10),
+        accounts: (process.env.MCP_EMAIL_VERIFICATION_ACCOUNTS ?? '')
+          .split(',')
+          .map((a) => a.trim())
+          .filter(Boolean),
+        sender_allowlist: (process.env.MCP_EMAIL_VERIFICATION_SENDER_ALLOWLIST ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        sender_denylist: (process.env.MCP_EMAIL_VERIFICATION_SENDER_DENYLIST ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      },
       cache: {
         // Opt-out rather than opt-in: the mirror is a pure win for reads and
         // degrades to live behaviour if anything goes wrong.
@@ -223,6 +248,17 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
     settings: {
       rateLimit: raw.settings.rate_limit,
       readOnly: raw.settings.read_only,
+      verification: {
+        enabled: raw.settings.verification.enabled,
+        autoCopy: raw.settings.verification.auto_copy,
+        notify: raw.settings.verification.notify,
+        copyLinks: raw.settings.verification.copy_links,
+        clearAfterSeconds: raw.settings.verification.clear_after_seconds,
+        maxAgeMinutes: raw.settings.verification.max_age_minutes,
+        accounts: raw.settings.verification.accounts,
+        senderAllowlist: raw.settings.verification.sender_allowlist,
+        senderDenylist: raw.settings.verification.sender_denylist,
+      },
       cache: {
         enabled: raw.settings.cache.enabled,
         mailboxes: raw.settings.cache.mailboxes,
@@ -346,6 +382,21 @@ read_only = false  # set to true to disable all write operations
 # enabled = false        # enable IMAP IDLE real-time monitoring
 # folders = ["INBOX"]    # folders to watch per account
 # idle_timeout = 1740    # seconds (29 min, IMAP max is 30)
+
+# Verification codes — when a mail carrying an OTP/2FA code or sign-in link
+# arrives, copy it to the clipboard (concealed from clipboard managers) and
+# show a notification. Ambient catching needs [settings.watcher] enabled;
+# the get_verification_code tool works either way.
+# [settings.verification]
+# enabled = true
+# auto_copy = true           # copy caught codes/links to the clipboard
+# notify = true              # desktop notification when something is caught
+# copy_links = true          # also catch magic links (when no code found)
+# clear_after_seconds = 60   # auto-clear clipboard if unchanged (0 = never)
+# max_age_minutes = 10       # ignore messages older than this
+# accounts = []              # watch these accounts only (empty = all)
+# sender_allowlist = []      # e.g. ["*@github.com", "*@google.com"]
+# sender_denylist = []
 
 # [settings.hooks]
 # on_new_email = "notify"  # "triage" (AI) | "notify" (log) | "none"
