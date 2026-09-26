@@ -12,6 +12,7 @@
 import type { Server } from '@modelcontextprotocol/server';
 import { mcpLog } from '../logging.js';
 import type { EmailMeta, HookRule, HooksConfig } from '../types/index.js';
+import { matchesPattern } from '../utils/glob.js';
 import type { NewEmailEvent } from './event-bus.js';
 import eventBus from './event-bus.js';
 import type ImapService from './imap.service.js';
@@ -49,32 +50,6 @@ interface RuleNoMatch {
 }
 
 type StaticMatchOutcome = RuleMatchResult | RuleNoMatch;
-
-// ---------------------------------------------------------------------------
-// Pattern matching helpers
-// ---------------------------------------------------------------------------
-
-/** Convert a glob-like pattern (with `*` wildcards and `|` OR) to a RegExp. */
-function globToRegex(pattern: string): RegExp {
-  const parts = pattern
-    .split('|')
-    .map((p) => p.trim())
-    .filter(Boolean);
-  const regexParts = parts.map((part) => {
-    const escaped = part.replace(/[.+?^${}()[\]\\]/g, '\\$&');
-    return escaped.replace(/\*/g, '.*');
-  });
-  return new RegExp(`^(?:${regexParts.join('|')})$`, 'i');
-}
-
-/** Test whether a value matches a glob pattern (case-insensitive). */
-function matchesPattern(pattern: string, value: string): boolean {
-  try {
-    return globToRegex(pattern).test(value);
-  } catch {
-    return false;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // HooksService

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type ImapService from '../services/imap.service.js';
 import type { Email, EmailMeta } from '../types/index.js';
 import { stripHtml } from '../utils/html.js';
+import { stripReplyChain } from '../utils/reply-chain.js';
 import { emailListOutputSchema, emailStatusOutputSchema } from './schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -34,18 +35,6 @@ function formatEmailMeta(email: EmailMeta): string {
   const labelStr = email.labels.length > 0 ? `\n  🏷️ ${email.labels.join(', ')}` : '';
 
   return `[${email.id}] ${flags} ${email.subject}\n  From: ${from} | ${email.date}${labelStr}${email.preview ? `\n  ${email.preview}` : ''}`;
-}
-
-/** Removes quoted reply chains and signatures from plain text. */
-function stripReplyChain(text: string): string {
-  const lines = text.split('\n');
-  const stopIdx = lines.findIndex((l) => /^--\s*$/.test(l) || /^_{3,}\s*$/.test(l));
-  const relevant = stopIdx === -1 ? lines : lines.slice(0, stopIdx);
-  return relevant
-    .filter((l) => !l.startsWith('>'))
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 type BodyFormat = 'full' | 'text' | 'stripped';
