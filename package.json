@@ -1,6 +1,6 @@
 {
   "name": "@codefuturist/email-mcp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "mcpName": "io.github.codefuturist/email-mcp",
   "description": "Email MCP server with IMAP + SMTP support",
   "type": "module",

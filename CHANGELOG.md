@@ -32,6 +32,23 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/) 
 - add pnpm install and usage instructions - ([13c8d4b](https://github.com/codefuturist/email-mcp/commit/13c8d4bf3006fa4fb5f014eb630006a478082a23))
 
 - - -
+## [v0.5.1](https://github.com/codefuturist/email-mcp/compare/0449a06d7cbc5a3c11e1ec1f16add39b4eca0d17..v0.5.1) - 2026-09-26
+#### ✨ Features
+- (**release**) build all common platforms via GoReleaser Pro in CI - ([5b6fb56](https://github.com/codefuturist/email-mcp/commit/5b6fb56274425e849499995fcb8cc20d9c308543)) - Kithrian, Claude Fable 5
+- (**release**) build provenance-attested bun binaries in CI - ([afd535c](https://github.com/codefuturist/email-mcp/commit/afd535c6cd5b823fb4efc1fa68b141ee8a51a6cf)) - Kithrian, Claude Fable 5
+#### 🐛 Bug Fixes
+- (**docker**) ship pnpm patch config into image build contexts - ([47961a4](https://github.com/codefuturist/email-mcp/commit/47961a40b9397725b64f8396e9b8140e0165c674)) - Kithrian, Claude Fable 5
+- (**imap**) repair TLS servername fallback for npm consumers at runtime - ([70d4215](https://github.com/codefuturist/email-mcp/commit/70d4215de07920252f672923cf3cd48aad7a0189)) - Kithrian, Claude Fable 5
+- (**release**) keep MCP Registry description under 100 chars - ([f41b42f](https://github.com/codefuturist/email-mcp/commit/f41b42f17e19de292415056b82f29533f0201c96)) - Kithrian, Claude Fable 5
+#### Build
+- (**goreleaser**) compile release binaries with the Pro bun builder - ([0449a06](https://github.com/codefuturist/email-mcp/commit/0449a06d7cbc5a3c11e1ec1f16add39b4eca0d17)) - Kithrian, Claude Fable 5
+#### CI
+- (**deps**) bump actions/checkout and goreleaser-action to v7 - ([4d7f38c](https://github.com/codefuturist/email-mcp/commit/4d7f38c400fb79268553f4fa7fbf6141ef16223b)) - Kithrian, Claude Fable 5
+#### Chores
+- (**npm**) normalize bin path via npm pkg fix - ([1056481](https://github.com/codefuturist/email-mcp/commit/1056481d37bb1720dc66fd9e3f6b935a815fd6a9)) - Kithrian, Claude Fable 5
+
+- - -
+
 ## [v0.5.0](https://github.com/codefuturist/email-mcp/compare/98bc426dee923bfa3d4dbd874fadcad72c30eed5..v0.5.0) - 2026-09-26
 #### ✨ Features
 - (**cli**) shell completion for zsh, bash, and fish - ([e0c6563](https://github.com/codefuturist/email-mcp/commit/e0c6563780a1b04200c44ac6649cb0970b6a7e70)) - Kithrian, Claude Fable 5
