@@ -197,6 +197,24 @@ sender_allowlist = ["*@github.com"]
       expect(config.settings.verification.enabled).toBe(true);
     });
 
+    it('normalizes [settings.server] and applies its defaults', async () => {
+      const toml = `${MINIMAL_TOML}
+[settings.server]
+port = 3199
+allowed_hosts = ["mail.example.com"]
+`;
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, toml, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.server.port).toBe(3199);
+      expect(config.settings.server.allowedHosts).toEqual(['mail.example.com']);
+      expect(config.settings.server.host).toBe('127.0.0.1');
+      expect(config.settings.server.path).toBe('/mcp');
+      expect(config.settings.server.token).toBe('');
+    });
+
     it('normalizes confirm_copy and link_action', async () => {
       const toml = `${MINIMAL_TOML}
 [settings.verification]

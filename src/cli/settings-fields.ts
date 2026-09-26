@@ -14,12 +14,20 @@ import {
   AlertsConfigSchema,
   CacheConfigSchema,
   HooksConfigSchema,
+  ServerConfigSchema,
   SettingsSchema,
   VerificationConfigSchema,
   WatcherConfigSchema,
 } from '../config/schema.js';
 
-export type SectionId = 'general' | 'watcher' | 'verification' | 'cache' | 'hooks' | 'alerts';
+export type SectionId =
+  | 'general'
+  | 'server'
+  | 'watcher'
+  | 'verification'
+  | 'cache'
+  | 'hooks'
+  | 'alerts';
 export type FieldKind = 'boolean' | 'int' | 'string' | 'enum' | 'string-array' | 'enum-array';
 
 export interface FieldDescriptor {
@@ -36,6 +44,8 @@ export interface FieldDescriptor {
   optional?: boolean;
   /** Rendering for an empty array / unset value, e.g. '(all)'. */
   emptyLabel?: string;
+  /** Never render the value (menus, diffs, config show) — mask it. */
+  secret?: boolean;
 }
 
 export interface SectionDescriptor {
@@ -61,6 +71,7 @@ function onOff(value: unknown): string {
 }
 
 const generalShape = SettingsSchema.shape;
+const serverShape = ServerConfigSchema.shape;
 const watcherShape = WatcherConfigSchema.shape;
 const verificationShape = VerificationConfigSchema.shape;
 const cacheShape = CacheConfigSchema.shape;
@@ -86,6 +97,50 @@ export const SETTINGS_SECTIONS: SectionDescriptor[] = [
         label: 'Read-only mode (disables all write tools)',
         kind: 'boolean',
         schema: generalShape.read_only,
+      },
+    ],
+  },
+  {
+    id: 'server',
+    label: 'Server (Streamable HTTP daemon)',
+    resolve: (raw) => raw.settings.server as unknown as Record<string, unknown>,
+    summarize: (raw) => {
+      const s = raw.settings.server;
+      return `${s.host}:${s.port}${s.path} | auth ${s.token ? 'on' : 'off'}`;
+    },
+    fields: [
+      {
+        key: 'host',
+        label: 'Bind address (non-loopback requires a token)',
+        kind: 'string',
+        schema: serverShape.host,
+      },
+      {
+        key: 'port',
+        label: 'Port (1-65535)',
+        kind: 'int',
+        schema: serverShape.port,
+      },
+      {
+        key: 'path',
+        label: 'HTTP path for the MCP endpoint',
+        kind: 'string',
+        schema: serverShape.path,
+      },
+      {
+        key: 'token',
+        label: 'Bearer token (empty = no auth, loopback only)',
+        kind: 'string',
+        schema: serverShape.token,
+        emptyLabel: '(none — loopback only)',
+        secret: true,
+      },
+      {
+        key: 'allowed_hosts',
+        label: 'Host-header allowlist for reverse proxies',
+        kind: 'string-array',
+        schema: serverShape.allowed_hosts,
+        emptyLabel: '(loopback defaults)',
       },
     ],
   },
@@ -381,6 +436,7 @@ export function resolveSection(id: string | undefined): SectionDescriptor | unde
 /** Render a field value as a single short line for menus and diffs. */
 export function formatFieldValue(f: FieldDescriptor, value: unknown): string {
   if (value === undefined || value === null) return f.emptyLabel ?? '(not set)';
+  if (f.secret && typeof value === 'string' && value !== '') return '••••••••';
   if (Array.isArray(value)) {
     if (value.length === 0) return f.emptyLabel ?? '(none)';
     return value.join(', ');
@@ -432,10 +488,14 @@ export function diffSection(
 ): FieldChange[] {
   const changes: FieldChange[] = [];
   for (const f of section.fields) {
-    const renderedBefore = formatFieldValue(f, before[f.key]);
-    const renderedAfter = formatFieldValue(f, after[f.key]);
-    if (renderedBefore !== renderedAfter) {
-      changes.push({ key: f.key, before: renderedBefore, after: renderedAfter });
+    // Detect on raw values (secret fields render identically when masked),
+    // display formatted.
+    if (JSON.stringify(before[f.key]) !== JSON.stringify(after[f.key])) {
+      changes.push({
+        key: f.key,
+        before: formatFieldValue(f, before[f.key]),
+        after: formatFieldValue(f, after[f.key]),
+      });
     }
   }
   return changes;

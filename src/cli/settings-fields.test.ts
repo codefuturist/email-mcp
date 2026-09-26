@@ -4,6 +4,7 @@ import {
   AppConfigFileSchema,
   CacheConfigSchema,
   HooksConfigSchema,
+  ServerConfigSchema,
   SettingsSchema,
   VerificationConfigSchema,
   WatcherConfigSchema,
@@ -47,12 +48,13 @@ describe('SETTINGS_SECTIONS drift guards', () => {
   // Both directions: every schema key is in the catalog (minus deliberate
   // exclusions) and the catalog invents no keys the schema lacks.
   const cases: [string, Record<string, unknown>, string[]][] = [
-    ['general', SettingsSchema.shape, ['verification', 'cache', 'watcher', 'hooks']],
+    ['general', SettingsSchema.shape, ['verification', 'cache', 'watcher', 'hooks', 'server']],
     ['watcher', WatcherConfigSchema.shape, []],
     ['verification', VerificationConfigSchema.shape, []],
     ['cache', CacheConfigSchema.shape, []],
     ['hooks', HooksConfigSchema.shape, ['rules', 'alerts']],
     ['alerts', AlertsConfigSchema.shape, []],
+    ['server', ServerConfigSchema.shape, []],
   ];
 
   it.each(cases)('%s covers its schema exactly', (id, shape, excluded) => {
@@ -65,9 +67,10 @@ describe('SETTINGS_SECTIONS drift guards', () => {
     expect(catalogKeys).toEqual(schemaKeys);
   });
 
-  it('exposes all six sections in order', () => {
+  it('exposes all seven sections in order', () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       'general',
+      'server',
       'watcher',
       'verification',
       'cache',
@@ -162,6 +165,12 @@ describe('formatFieldValue', () => {
     expect(rendered.length).toBeLessThan(80);
     expect(rendered).toContain('…');
   });
+
+  it('masks secret fields but still shows emptiness', () => {
+    const token = field('server', 'token');
+    expect(formatFieldValue(token, 'super-secret-bearer')).toBe('••••••••');
+    expect(formatFieldValue(token, '')).toContain('none');
+  });
 });
 
 describe('diffSection', () => {
@@ -190,6 +199,20 @@ describe('diffSection', () => {
     expect(hooksChanges).toEqual([
       { key: 'custom_instructions', before: '(not set)', after: 'be brief' },
     ]);
+  });
+
+  it('detects changes to secret fields even though both render masked', () => {
+    const before = materializedConfig();
+    const after = structuredClone(before);
+    before.settings.server.token = 'old-secret';
+    after.settings.server.token = 'new-secret';
+
+    const s = section('server');
+    const changes = diffSection(s, s.resolve(before), s.resolve(after));
+    expect(changes).toHaveLength(1);
+    expect(changes[0]?.key).toBe('token');
+    expect(changes[0]?.before).toBe('••••••••');
+    expect(changes[0]?.after).toBe('••••••••');
   });
 });
 

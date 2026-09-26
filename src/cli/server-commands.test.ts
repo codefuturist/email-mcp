@@ -1,4 +1,9 @@
-import { looksLikeOurServer, parseServerArgs, tailLines } from './server-commands.js';
+import {
+  buildLaunchdPlist,
+  looksLikeOurServer,
+  parseServerArgs,
+  tailLines,
+} from './server-commands.js';
 
 describe('parseServerArgs', () => {
   it('applies defaults (detached, loopback, port 8080)', () => {
@@ -31,6 +36,25 @@ describe('parseServerArgs', () => {
     expect(args.port).toBe(9001);
   });
 
+  it('layers precedence: flags over env over [settings.server] over defaults', () => {
+    const serverConfig = {
+      host: '10.0.0.5',
+      port: 3299,
+      path: '/mcp',
+      token: '',
+      allowedHosts: [],
+    };
+    // config layer alone
+    expect(parseServerArgs([], {}, serverConfig).port).toBe(3299);
+    expect(parseServerArgs([], {}, serverConfig).host).toBe('10.0.0.5');
+    // env beats config
+    expect(parseServerArgs([], { EMAIL_MCP_HTTP_PORT: '9001' }, serverConfig).port).toBe(9001);
+    // flags beat env
+    expect(
+      parseServerArgs(['--port', '3199'], { EMAIL_MCP_HTTP_PORT: '9001' }, serverConfig).port,
+    ).toBe(3199);
+  });
+
   it('flags win over env', () => {
     const args = parseServerArgs(['--port', '3199'], { EMAIL_MCP_HTTP_PORT: '9001' });
     expect(args.port).toBe(3199);
@@ -53,6 +77,24 @@ describe('looksLikeOurServer', () => {
   it('rejects unrelated processes (pid reuse safety)', () => {
     expect(looksLikeOurServer('/usr/bin/python3 some-script.py')).toBe(false);
     expect(looksLikeOurServer('')).toBe(false);
+  });
+});
+
+describe('buildLaunchdPlist', () => {
+  it('produces a KeepAlive login item running the http entry', () => {
+    const plist = buildLaunchdPlist('/usr/local/bin/node', '/x/dist/main.js', ['--port', '3199']);
+
+    expect(plist).toContain('<string>com.email-mcp.server</string>');
+    expect(plist).toContain('<key>KeepAlive</key>');
+    expect(plist).toContain('<key>RunAtLoad</key>');
+    const argOrder = ['/usr/local/bin/node', '/x/dist/main.js', 'http', '--port', '3199'];
+    let lastIndex = -1;
+    for (const arg of argOrder) {
+      const idx = plist.indexOf(`<string>${arg}</string>`);
+      expect(idx).toBeGreaterThan(lastIndex);
+      lastIndex = idx;
+    }
+    expect(plist).toContain('server.log</string>');
   });
 });
 

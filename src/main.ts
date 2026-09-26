@@ -44,6 +44,7 @@ Examples:
   email-mcp server start --attach    # Same, but in the foreground (Ctrl-C stops)
   email-mcp server status            # Is it running? (pid, address, health)
   email-mcp server stop              # Stop the detached server
+  email-mcp server install           # macOS login item (launchd) — survives reboots
   email-mcp account list             # List configured accounts
   email-mcp account add              # Add a new email account
   email-mcp account edit personal    # Edit an account

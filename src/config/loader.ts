@@ -46,6 +46,16 @@ function loadFromEnv(): RawAppConfig | null {
     settings: {
       rate_limit: parseInt(process.env.MCP_EMAIL_RATE_LIMIT ?? '10', 10),
       read_only: process.env.MCP_EMAIL_READ_ONLY === 'true',
+      server: {
+        host: process.env.EMAIL_MCP_HTTP_HOST ?? '127.0.0.1',
+        port: parseInt(process.env.EMAIL_MCP_HTTP_PORT ?? '8080', 10),
+        path: process.env.EMAIL_MCP_HTTP_PATH ?? '/mcp',
+        token: process.env.EMAIL_MCP_HTTP_TOKEN ?? '',
+        allowed_hosts: (process.env.EMAIL_MCP_HTTP_ALLOWED_HOSTS ?? '')
+          .split(',')
+          .map((h) => h.trim())
+          .filter(Boolean),
+      },
       verification: {
         // Opt-out like cache: the feature is inert until the watcher runs,
         // and the on-demand tool is read-only unless asked to copy.
@@ -250,6 +260,13 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
     settings: {
       rateLimit: raw.settings.rate_limit,
       readOnly: raw.settings.read_only,
+      server: {
+        host: raw.settings.server.host,
+        port: raw.settings.server.port,
+        path: raw.settings.server.path,
+        token: raw.settings.server.token,
+        allowedHosts: raw.settings.server.allowed_hosts,
+      },
       verification: {
         enabled: raw.settings.verification.enabled,
         autoCopy: raw.settings.verification.auto_copy,
@@ -426,6 +443,15 @@ read_only = false  # set to true to disable all write operations
 # body_messages = 500     # newest N messages to prefetch bodies for
 # max_size_mb = 500       # backstop on mirror size
 # sync_interval = 300     # seconds between background reconciles
+
+# Streamable HTTP server ('email-mcp http' / 'email-mcp server start').
+# Precedence: CLI flags > EMAIL_MCP_HTTP_* env > this section > defaults.
+# [settings.server]
+# host = "127.0.0.1"
+# port = 8080
+# path = "/mcp"
+# token = ""             # bearer token; empty = no auth (loopback only)
+# allowed_hosts = []     # Host-header allowlist for reverse proxies
 
 # [settings.watcher]
 # enabled = false        # enable IMAP IDLE real-time monitoring

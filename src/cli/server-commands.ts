@@ -17,9 +17,12 @@
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
+import { loadConfig } from '../config/loader.js';
 import { DAEMON_LOG_FILE, DAEMON_STATE_FILE } from '../config/xdg.js';
+import type { ServerConfig } from '../types/index.js';
 
 const HEALTH_TIMEOUT_MS = 1000;
 const START_WAIT_MS = 10_000;
@@ -27,6 +30,9 @@ const STOP_WAIT_MS = 10_000;
 const POLL_INTERVAL_MS = 500;
 const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
 const DEFAULT_LOG_LINES = 40;
+
+const LAUNCHD_LABEL = 'com.email-mcp.server';
+const LAUNCHD_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
 
 export interface ServerArgs {
   attach: boolean;
@@ -39,17 +45,22 @@ export interface ServerArgs {
   passthrough: string[];
 }
 
-/** Server-level flags are consumed; everything else forwards to `http`. */
+/**
+ * Server-level flags are consumed; everything else forwards to `http`.
+ * host/port resolve with the same precedence the http entry uses:
+ * flags → EMAIL_MCP_HTTP_* env → [settings.server] → defaults.
+ */
 export function parseServerArgs(
   argv: string[],
   env: Record<string, string | undefined> = process.env,
+  serverConfig?: ServerConfig,
 ): ServerArgs {
   const args: ServerArgs = {
     attach: false,
     force: false,
     lines: DEFAULT_LOG_LINES,
-    host: env.EMAIL_MCP_HTTP_HOST ?? '127.0.0.1',
-    port: Number(env.EMAIL_MCP_HTTP_PORT ?? '8080'),
+    host: env.EMAIL_MCP_HTTP_HOST ?? serverConfig?.host ?? '127.0.0.1',
+    port: Number(env.EMAIL_MCP_HTTP_PORT ?? serverConfig?.port ?? 8080),
     passthrough: [],
   };
 
@@ -112,6 +123,38 @@ export function tailLines(text: string, n: number): string {
   return lines.slice(Math.max(0, lines.length - n)).join('\n');
 }
 
+/**
+ * launchd login item: RunAtLoad + KeepAlive make the server start at login
+ * and restart on crash — the config file (not flags) is its source of truth,
+ * so passthrough is normally empty.
+ */
+export function buildLaunchdPlist(execPath: string, entry: string, passthrough: string[]): string {
+  const programArgs = [execPath, entry, 'http', ...passthrough]
+    .map((a) => `    <string>${a}</string>`)
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+${programArgs}
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${DAEMON_LOG_FILE}</string>
+  <key>StandardErrorPath</key>
+  <string>${DAEMON_LOG_FILE}</string>
+</dict>
+</plist>
+`;
+}
+
 // ---------------------------------------------------------------------------
 // Daemon state
 // ---------------------------------------------------------------------------
@@ -165,6 +208,23 @@ async function liveDaemon(): Promise<DaemonRecord | undefined> {
   return record;
 }
 
+async function launchdLoaded(): Promise<boolean> {
+  if (process.platform !== 'darwin') return false;
+  return new Promise((resolve) => {
+    execFile('launchctl', ['list', LAUNCHD_LABEL], { timeout: 3000 }, (err) => {
+      resolve(!err);
+    });
+  });
+}
+
+function launchctl(args: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile('launchctl', args, { timeout: 10_000 }, (err) => {
+      resolve(!err);
+    });
+  });
+}
+
 function probeHost(host: string): string {
   return host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
 }
@@ -202,6 +262,14 @@ async function startServer(args: ServerArgs): Promise<void> {
     console.error(
       `Server already running (pid ${existing.pid}) on http://${existing.host}:${existing.port}/mcp.\n` +
         `Use 'email-mcp server restart' or 'email-mcp server stop' first.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (await launchdLoaded()) {
+    console.error(
+      `Server is managed by launchd (${LAUNCHD_LABEL}) — it is already always-on.\n` +
+        `Use 'email-mcp server uninstall' first if you want a manually managed daemon.`,
     );
     process.exitCode = 1;
     return;
@@ -267,6 +335,15 @@ async function startServer(args: ServerArgs): Promise<void> {
 async function stopServer(args: ServerArgs): Promise<void> {
   const record = await readDaemonRecord();
   if (!record) {
+    if (await launchdLoaded()) {
+      console.error(
+        `Server is managed by launchd (${LAUNCHD_LABEL}) and restarts automatically.\n` +
+          `Remove it with 'email-mcp server uninstall', or pause until next login with:\n` +
+          `  launchctl unload ${LAUNCHD_PLIST}`,
+      );
+      process.exitCode = 1;
+      return;
+    }
     console.log('Server is not running (no daemon state).');
     return;
   }
@@ -303,11 +380,22 @@ async function stopServer(args: ServerArgs): Promise<void> {
   process.exitCode = 1;
 }
 
-async function serverStatus(): Promise<void> {
+async function serverStatus(args: ServerArgs): Promise<void> {
   const record = await readDaemonRecord();
   const live = record ? await liveDaemon() : undefined;
 
   if (!live) {
+    if (await launchdLoaded()) {
+      const healthy = await healthOk(args.host, args.port);
+      console.log(`✅ Server running (launchd login item)`);
+      console.log(`   Label:   ${LAUNCHD_LABEL}`);
+      console.log(`   Address: http://${args.host}:${args.port}/mcp`);
+      console.log(`   Health:  ${healthy ? '✅ /healthz ok' : '❌ /healthz not answering'}`);
+      console.log(`   Plist:   ${LAUNCHD_PLIST}`);
+      console.log(`   Logs:    ${DAEMON_LOG_FILE}`);
+      if (!healthy) process.exitCode = 1;
+      return;
+    }
     console.log(
       record
         ? `Server not running (stale state for pid ${record.pid}). 'server start' will clean up.`
@@ -325,6 +413,85 @@ async function serverStatus(): Promise<void> {
   console.log(`   Health:  ${healthy ? '✅ /healthz ok' : '❌ /healthz not answering'}`);
   console.log(`   Uptime:  ${uptimeMin} min (since ${live.startedAt})`);
   console.log(`   Logs:    ${DAEMON_LOG_FILE}`);
+}
+
+async function installServer(args: ServerArgs): Promise<void> {
+  if (process.platform !== 'darwin') {
+    console.error(
+      'server install (login item) is macOS-only for now. Use `email-mcp server start` ' +
+        'or wire `email-mcp http` into your init system (systemd unit, etc.).',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const entry = process.argv[1];
+  if (!entry?.endsWith('.js')) {
+    throw new Error(
+      'Install needs the built entry point (dist/main.js or the installed email-mcp binary).',
+    );
+  }
+
+  const existing = await liveDaemon();
+  if (existing) {
+    console.error(
+      `A manually started server is running (pid ${existing.pid}). ` +
+        `Run 'email-mcp server stop' first, then install.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  await fsp.mkdir(path.dirname(LAUNCHD_PLIST), { recursive: true });
+  await fsp.mkdir(path.dirname(DAEMON_LOG_FILE), { recursive: true });
+  await fsp.writeFile(LAUNCHD_PLIST, buildLaunchdPlist(process.execPath, entry, args.passthrough));
+
+  await launchctl(['unload', LAUNCHD_PLIST]); // reload cleanly if it was loaded
+  const loaded = await launchctl(['load', LAUNCHD_PLIST]);
+  if (!loaded) {
+    console.error(`❌ launchctl load failed for ${LAUNCHD_PLIST}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const deadline = Date.now() + START_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (await healthOk(args.host, args.port)) {
+      console.log(`✅ Installed as a login item (${LAUNCHD_LABEL})`);
+      console.log(`   Address: http://${args.host}:${args.port}/mcp`);
+      console.log(`   Starts at login and restarts on crash (KeepAlive).`);
+      console.log(`   Config:  [settings.server] in config.toml is the source of truth.`);
+      console.log(`   Plist:   ${LAUNCHD_PLIST}`);
+      console.log(`   Logs:    ${DAEMON_LOG_FILE}`);
+      console.log(`   Remove:  email-mcp server uninstall`);
+      return;
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `⚠️ Login item installed, but /healthz did not answer within ${START_WAIT_MS / 1000}s.\n` +
+      `   Check the logs: ${DAEMON_LOG_FILE}`,
+  );
+}
+
+async function uninstallServer(): Promise<void> {
+  if (process.platform !== 'darwin') {
+    console.error('server uninstall is macOS-only for now.');
+    process.exitCode = 1;
+    return;
+  }
+  const wasLoaded = await launchctl(['unload', LAUNCHD_PLIST]);
+  let hadPlist = true;
+  try {
+    await fsp.rm(LAUNCHD_PLIST);
+  } catch {
+    hadPlist = false;
+  }
+  if (wasLoaded || hadPlist) {
+    console.log(`✅ Login item removed (${LAUNCHD_LABEL}). The server is stopped.`);
+  } else {
+    console.log('No login item was installed.');
+  }
 }
 
 async function showLogs(args: ServerArgs): Promise<void> {
@@ -350,12 +517,21 @@ Subcommands:
   status                         Show pid, address, health, and uptime (exit 1 if stopped)
   restart [http flags]           Stop and start again (reuses previous flags)
   logs [-n N]                    Show the last N daemon log lines (default ${DEFAULT_LOG_LINES})
+  install [http flags]           Install as a macOS login item (launchd, KeepAlive) — true always-on
+  uninstall                      Remove the login item and stop the server
+
+Binding is configured in [settings.server] in config.toml; flags and
+EMAIL_MCP_HTTP_* env vars override it per invocation.
 `);
 }
 
 export default async function runServerCommand(argv: string[]): Promise<void> {
   const [subcommand, ...rest] = argv;
-  const args = parseServerArgs(rest);
+  // Best-effort: daemon commands still work without a config file (env mode).
+  const serverConfig = await loadConfig()
+    .then((c) => c.settings.server)
+    .catch(() => undefined);
+  const args = parseServerArgs(rest, process.env, serverConfig);
 
   switch (subcommand) {
     case 'start':
@@ -365,7 +541,13 @@ export default async function runServerCommand(argv: string[]): Promise<void> {
       await stopServer(args);
       return;
     case 'status':
-      await serverStatus();
+      await serverStatus(args);
+      return;
+    case 'install':
+      await installServer(args);
+      return;
+    case 'uninstall':
+      await uninstallServer();
       return;
     case 'restart': {
       const record = await readDaemonRecord();

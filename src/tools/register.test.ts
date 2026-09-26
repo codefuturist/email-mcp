@@ -43,6 +43,7 @@ function createConfig(readOnly: boolean): AppConfig {
     settings: {
       rateLimit: 10,
       readOnly,
+      server: { host: '127.0.0.1', port: 8080, path: '/mcp', token: '', allowedHosts: [] },
       verification: {
         enabled: true,
         autoCopy: true,

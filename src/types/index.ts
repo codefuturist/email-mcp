@@ -137,6 +137,16 @@ export interface HooksConfig {
   calendarConfirm?: boolean;
 }
 
+/** Streamable HTTP server binding — see ServerConfigSchema for precedence. */
+export interface ServerConfig {
+  host: string;
+  port: number;
+  path: string;
+  /** Bearer token; empty = no auth (loopback only). */
+  token: string;
+  allowedHosts: string[];
+}
+
 /** Verification-code / magic-link catching — see VerificationConfigSchema. */
 export interface VerificationConfig {
   enabled: boolean;
@@ -168,6 +178,7 @@ export interface AppConfig {
   settings: {
     rateLimit: number;
     readOnly: boolean;
+    server: ServerConfig;
     verification: VerificationConfig;
     cache: CacheConfig;
     watcher: WatcherConfig;

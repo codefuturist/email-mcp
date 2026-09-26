@@ -485,6 +485,13 @@ async function addAccount(): Promise<void> {
         settings: {
           rate_limit: 10,
           read_only: false,
+          server: {
+            host: '127.0.0.1',
+            port: 8080,
+            path: '/mcp',
+            token: '',
+            allowed_hosts: [],
+          },
           verification: {
             enabled: true,
             auto_copy: true,

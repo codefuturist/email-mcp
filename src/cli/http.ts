@@ -25,8 +25,9 @@ import {
 } from '@modelcontextprotocol/node';
 
 import { buildServer, buildServices, startBackgroundServices } from '../app.js';
+import type { ServerConfig } from '../types/index.js';
 
-interface HttpOptions {
+export interface HttpOptions {
   host: string;
   port: number;
   path: string;
@@ -41,18 +42,26 @@ function isLoopback(host: string): boolean {
   return LOOPBACK.has(host);
 }
 
-/** Parse `http` subcommand flags, falling back to env vars then defaults. */
-function parseOptions(argv: string[]): HttpOptions {
-  const env = process.env;
+/**
+ * Resolve `http` options with the layered precedence:
+ * CLI flags → EMAIL_MCP_HTTP_* env → [settings.server] → built-in defaults.
+ */
+export function parseOptions(
+  argv: string[],
+  env: Record<string, string | undefined> = process.env,
+  serverConfig?: ServerConfig,
+): HttpOptions {
   const opts: HttpOptions = {
-    host: env.EMAIL_MCP_HTTP_HOST ?? '127.0.0.1',
-    port: Number(env.EMAIL_MCP_HTTP_PORT ?? '8080'),
-    path: env.EMAIL_MCP_HTTP_PATH ?? '/mcp',
-    token: env.EMAIL_MCP_HTTP_TOKEN,
-    allowedHosts: (env.EMAIL_MCP_HTTP_ALLOWED_HOSTS ?? '')
-      .split(',')
-      .map((h) => h.trim())
-      .filter(Boolean),
+    host: env.EMAIL_MCP_HTTP_HOST ?? serverConfig?.host ?? '127.0.0.1',
+    port: Number(env.EMAIL_MCP_HTTP_PORT ?? serverConfig?.port ?? 8080),
+    path: env.EMAIL_MCP_HTTP_PATH ?? serverConfig?.path ?? '/mcp',
+    // An empty config token means "no auth", same as an unset env var.
+    token: env.EMAIL_MCP_HTTP_TOKEN ?? (serverConfig?.token ? serverConfig.token : undefined),
+    allowedHosts: env.EMAIL_MCP_HTTP_ALLOWED_HOSTS
+      ? env.EMAIL_MCP_HTTP_ALLOWED_HOSTS.split(',')
+          .map((h) => h.trim())
+          .filter(Boolean)
+      : (serverConfig?.allowedHosts ?? []),
     insecure: false,
   };
 
@@ -108,19 +117,19 @@ function tokenMatches(header: string | undefined, token: string): boolean {
 }
 
 export default async function runHttp(argv: string[]): Promise<void> {
-  const opts = parseOptions(argv);
+  const services = await buildServices();
+  const opts = parseOptions(argv, process.env, services.config.settings.server);
 
   // Safety: never expose a networked email server without authentication.
   if (!isLoopback(opts.host) && !opts.token && !opts.insecure) {
     throw new Error(
       `Refusing to bind ${opts.host} without authentication.\n` +
-        `Set a token (EMAIL_MCP_HTTP_TOKEN or --token) so requests must present ` +
-        `"Authorization: Bearer <token>", or pass --insecure if auth/TLS is ` +
+        `Set a token ([settings.server] token, EMAIL_MCP_HTTP_TOKEN, or --token) so requests ` +
+        `must present "Authorization: Bearer <token>", or pass --insecure if auth/TLS is ` +
         `terminated by an upstream proxy.`,
     );
   }
 
-  const services = await buildServices();
   const server = buildServer(services);
 
   // Stateless Streamable HTTP (no session IDs) — matches the 2026-07-28 model.

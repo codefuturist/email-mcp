@@ -166,9 +166,32 @@ export const VerificationConfigSchema = z.object({
   sender_denylist: z.array(z.string()).default([]),
 });
 
+/**
+ * Streamable HTTP server binding, used by `email-mcp http` and the
+ * `email-mcp server` daemon commands. Precedence at runtime:
+ * CLI flags → EMAIL_MCP_HTTP_* env → this section → built-in defaults.
+ * `--insecure` is deliberately flag-only and cannot be persisted here.
+ */
+export const ServerConfigSchema = z.object({
+  host: z.string().min(1).default('127.0.0.1'),
+  port: z.number().int().min(1).max(65535).default(8080),
+  path: z.string().min(1).default('/mcp'),
+  /** Bearer token; empty = no auth (safe on loopback only). */
+  token: z.string().default(''),
+  /** Host-header allowlist for reverse-proxy setups (empty = loopback defaults). */
+  allowed_hosts: z.array(z.string()).default([]),
+});
+
 export const SettingsSchema = z.object({
   rate_limit: z.number().int().min(1).default(10),
   read_only: z.boolean().default(false),
+  server: ServerConfigSchema.default({
+    host: '127.0.0.1',
+    port: 8080,
+    path: '/mcp',
+    token: '',
+    allowed_hosts: [],
+  }),
   verification: VerificationConfigSchema.default({
     enabled: true,
     auto_copy: true,
@@ -220,6 +243,13 @@ export const AppConfigFileSchema = z.object({
   settings: SettingsSchema.default({
     rate_limit: 10,
     read_only: false,
+    server: {
+      host: '127.0.0.1',
+      port: 8080,
+      path: '/mcp',
+      token: '',
+      allowed_hosts: [],
+    },
     verification: {
       enabled: true,
       auto_copy: true,

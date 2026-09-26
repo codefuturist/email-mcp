@@ -163,6 +163,27 @@ describe('verification settings', () => {
   });
 });
 
+describe('server settings', () => {
+  it('applies server defaults via SettingsSchema and AppConfigFileSchema', () => {
+    const expected = {
+      host: '127.0.0.1',
+      port: 8080,
+      path: '/mcp',
+      token: '',
+      allowed_hosts: [],
+    };
+    expect(SettingsSchema.parse({}).server).toEqual(expected);
+    expect(AppConfigFileSchema.parse({ accounts: [validAccount()] }).settings.server).toEqual(
+      expected,
+    );
+  });
+
+  it('rejects out-of-range ports', () => {
+    expect(() => SettingsSchema.parse({ server: { port: 0 } })).toThrow();
+    expect(() => SettingsSchema.parse({ server: { port: 65536 } })).toThrow();
+  });
+});
+
 describe('AppConfigFileSchema', () => {
   it('accepts valid config with one account', () => {
     const result = AppConfigFileSchema.parse({ accounts: [validAccount()] });

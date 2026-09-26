@@ -348,11 +348,31 @@ email-mcp server restart            # reuses the previous flags
 email-mcp server stop               # graceful SIGTERM (add --force for SIGKILL)
 ```
 
+The binding lives in the config file, so a plain `server start` is deterministic:
+
+```toml
+[settings.server]
+host = "127.0.0.1"
+port = 8080
+path = "/mcp"
+token = ""            # bearer token; empty = no auth (loopback only)
+allowed_hosts = []    # Host-header allowlist for reverse proxies
+```
+
+Precedence: CLI flags → `EMAIL_MCP_HTTP_*` env → `[settings.server]` → defaults —
+for `email-mcp http`, `server start`, and the launchd login item alike. Edit it
+interactively with `config edit server` (the token renders masked). `--insecure`
+is deliberately flag-only and cannot be persisted.
+
+**Start at login (macOS):** `email-mcp server install` writes a launchd login item
+(`com.email-mcp.server`, RunAtLoad + KeepAlive) running `email-mcp http` with no
+flags — the config file is its single source of truth across reboots and crashes.
+`server status` recognizes the launchd mode; `server uninstall` removes it.
+
 State lives in `$XDG_STATE_HOME/email-mcp/daemon.json`, logs in `server.log` next to
 it (rotated at 5 MB). `stop` only ever signals a process whose command line is
 verifiably this server (PID-reuse safe). Point HTTP-capable MCP clients at
-`http://127.0.0.1:8080/mcp`; binding non-loopback hosts still requires a token, as
-with `email-mcp http`.
+`http://127.0.0.1:8080/mcp`; binding non-loopback hosts still requires a token.
 
 ### Streamable HTTP (networked)
 
@@ -419,6 +439,8 @@ Commands:
   server status             Show pid, address, health, uptime (exit 1 if stopped)
   server restart            Stop and start again (reuses previous flags)
   server logs [-n N]        Show the last N daemon log lines
+  server install            Install as macOS login item (launchd, survives reboots)
+  server uninstall          Remove the login item and stop the server
   account list              List all configured accounts
   account add               Add a new email account interactively
   account edit [name]       Edit an existing account
