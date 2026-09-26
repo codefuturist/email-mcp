@@ -19,7 +19,7 @@ jobs:
       unix: ${{ steps.ts.outputs.unix }}
       is-stable: ${{ steps.version.outputs.is-stable }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - id: version
         run: |
           V="$(jq -r .version package.json)"
