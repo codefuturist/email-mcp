@@ -2,7 +2,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { configExists, generateTemplate, loadConfig, saveConfig } from './loader.js';
+import {
+  configExists,
+  generateTemplate,
+  loadConfig,
+  loadRawConfig,
+  saveConfig,
+  saveConfigValidated,
+} from './loader.js';
 
 const MINIMAL_TOML = `
 [[accounts]]
@@ -271,6 +278,64 @@ link_action = "copy"
       expect(reloaded.accounts[0].name).toBe('saved-test');
       expect(reloaded.accounts[0].email).toBe('saved@example.com');
       expect(reloaded.accounts[0].imap.host).toBe('imap.saved.com');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // saveConfigValidated
+  // -------------------------------------------------------------------------
+
+  describe('saveConfigValidated', () => {
+    it('rejects an invalid config and leaves the existing file untouched', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+      const originalBytes = await fs.readFile(configPath, 'utf-8');
+
+      const invalid = { accounts: [] } as never;
+      await expect(saveConfigValidated(invalid, configPath)).rejects.toThrow();
+
+      expect(await fs.readFile(configPath, 'utf-8')).toBe(originalBytes);
+      expect(await configExists(`${configPath}.bak`)).toBe(false);
+    });
+
+    it('backs up the previous file bytes before writing', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      const original = `# my precious comment\n${MINIMAL_TOML}`;
+      await fs.writeFile(configPath, original, 'utf-8');
+      const raw = await loadRawConfig(configPath);
+      raw.settings.watcher.enabled = true;
+
+      const result = await saveConfigValidated(raw, configPath);
+
+      expect(result.backupPath).toBe(`${configPath}.bak`);
+      expect(await fs.readFile(`${configPath}.bak`, 'utf-8')).toBe(original);
+      const reloaded = await loadRawConfig(configPath);
+      expect(reloaded.settings.watcher.enabled).toBe(true);
+    });
+
+    it('handles the very first save without a backup', async () => {
+      const configPath = path.join(tmpDir, 'fresh.toml');
+      const srcPath = path.join(tmpDir, 'src.toml');
+      await fs.writeFile(srcPath, MINIMAL_TOML, 'utf-8');
+      const raw = await loadRawConfig(srcPath);
+
+      const result = await saveConfigValidated(raw, configPath);
+
+      expect(result.backupPath).toBeUndefined();
+      expect(result.commentsLost).toBe(false);
+      expect(await configExists(configPath)).toBe(true);
+    });
+
+    it('flags comment loss only on the first overwrite of a commented file', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, `# documented\n${MINIMAL_TOML}`, 'utf-8');
+      const raw = await loadRawConfig(configPath);
+
+      const first = await saveConfigValidated(raw, configPath);
+      const second = await saveConfigValidated(await loadRawConfig(configPath), configPath);
+
+      expect(first.commentsLost).toBe(true);
+      expect(second.commentsLost).toBe(false);
     });
   });
 

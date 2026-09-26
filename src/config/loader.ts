@@ -360,6 +360,51 @@ export async function saveConfig(
   await fs.writeFile(filePath, toml, 'utf-8');
 }
 
+export interface SaveResult {
+  /** Set when a previous file existed and was backed up. */
+  backupPath?: string;
+  /**
+   * True when this save overwrote a file that still carried `#` comments and
+   * no `.bak` existed yet — callers should surface a one-time notice, since
+   * smol-toml stringify cannot preserve comments.
+   */
+  commentsLost: boolean;
+}
+
+/**
+ * Validate, back up, then save.
+ *
+ * Zod-parses BEFORE any disk write (an invalid object never clobbers a valid
+ * file), then best-effort copies the previous file bytes to `<path>.bak` so a
+ * bad save (or the inevitable comment loss) is recoverable.
+ *
+ * Note: raw configs are fully materialized by the schema defaults, so every
+ * save writes every key explicitly — future default changes will not reach a
+ * file once it has been saved. That has always been true of every save path.
+ */
+export async function saveConfigValidated(
+  config: RawAppConfig,
+  filePath: string = CONFIG_FILE,
+): Promise<SaveResult> {
+  AppConfigFileSchema.parse(config);
+
+  let backupPath: string | undefined;
+  let commentsLost = false;
+  try {
+    const previous = await fs.readFile(filePath, 'utf-8');
+    const bak = `${filePath}.bak`;
+    const bakExisted = await configExists(bak);
+    await fs.writeFile(bak, previous, 'utf-8');
+    backupPath = bak;
+    commentsLost = !bakExisted && /^\s*#/m.test(previous);
+  } catch {
+    // First save or unreadable previous file — the backup is best-effort.
+  }
+
+  await saveConfig(config, filePath);
+  return { backupPath, commentsLost };
+}
+
 /**
  * Generate a template TOML config string.
  */
