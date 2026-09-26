@@ -5,23 +5,27 @@
  * categorization and optional execution.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 export default function registerCleanupPrompt(server: McpServer): void {
-  server.prompt(
+  server.registerPrompt(
     'cleanup_inbox',
-    'AI-guided inbox cleanup — categorizes emails and suggests or executes organization actions.',
     {
-      account: z.string().describe('Account name to clean up'),
-      older_than_days: z
-        .string()
-        .default('30')
-        .describe('Only consider emails older than N days (default: 30)'),
-      dry_run: z
-        .string()
-        .default('true')
-        .describe("'true' = suggest only, 'false' = execute actions (default: true)"),
+      title: 'Cleanup inbox',
+      description:
+        'AI-guided inbox cleanup — categorizes emails and suggests or executes organization actions.',
+      argsSchema: z.object({
+        account: z.string().describe('Account name to clean up'),
+        older_than_days: z
+          .string()
+          .default('30')
+          .describe('Only consider emails older than N days (default: 30)'),
+        dry_run: z
+          .string()
+          .default('true')
+          .describe("'true' = suggest only, 'false' = execute actions (default: true)"),
+      }),
     },
     async ({ account, older_than_days: olderThan, dry_run: dryRun }) => {
       const days = Math.max(parseInt(olderThan, 10) || 30, 1);

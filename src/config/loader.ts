@@ -46,6 +46,56 @@ function loadFromEnv(): RawAppConfig | null {
     settings: {
       rate_limit: parseInt(process.env.MCP_EMAIL_RATE_LIMIT ?? '10', 10),
       read_only: process.env.MCP_EMAIL_READ_ONLY === 'true',
+      server: {
+        host: process.env.EMAIL_MCP_HTTP_HOST ?? '127.0.0.1',
+        port: parseInt(process.env.EMAIL_MCP_HTTP_PORT ?? '8080', 10),
+        path: process.env.EMAIL_MCP_HTTP_PATH ?? '/mcp',
+        token: process.env.EMAIL_MCP_HTTP_TOKEN ?? '',
+        allowed_hosts: (process.env.EMAIL_MCP_HTTP_ALLOWED_HOSTS ?? '')
+          .split(',')
+          .map((h) => h.trim())
+          .filter(Boolean),
+      },
+      verification: {
+        // Opt-out like cache: the feature is inert until the watcher runs,
+        // and the on-demand tool is read-only unless asked to copy.
+        enabled: process.env.MCP_EMAIL_VERIFICATION_ENABLED !== 'false',
+        auto_copy: process.env.MCP_EMAIL_VERIFICATION_AUTO_COPY !== 'false',
+        confirm_copy: process.env.MCP_EMAIL_VERIFICATION_CONFIRM_COPY === 'true',
+        notify: process.env.MCP_EMAIL_VERIFICATION_NOTIFY !== 'false',
+        copy_links: process.env.MCP_EMAIL_VERIFICATION_COPY_LINKS !== 'false',
+        link_action: (process.env.MCP_EMAIL_VERIFICATION_LINK_ACTION as 'open' | 'copy') ?? 'open',
+        clear_after_seconds: parseInt(
+          process.env.MCP_EMAIL_VERIFICATION_CLEAR_AFTER_SECONDS ?? '60',
+          10,
+        ),
+        max_age_minutes: parseInt(process.env.MCP_EMAIL_VERIFICATION_MAX_AGE_MINUTES ?? '10', 10),
+        accounts: (process.env.MCP_EMAIL_VERIFICATION_ACCOUNTS ?? '')
+          .split(',')
+          .map((a) => a.trim())
+          .filter(Boolean),
+        sender_allowlist: (process.env.MCP_EMAIL_VERIFICATION_SENDER_ALLOWLIST ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        sender_denylist: (process.env.MCP_EMAIL_VERIFICATION_SENDER_DENYLIST ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      },
+      cache: {
+        // Opt-out rather than opt-in: the mirror is a pure win for reads and
+        // degrades to live behaviour if anything goes wrong.
+        enabled: process.env.MCP_EMAIL_CACHE_ENABLED !== 'false',
+        mailboxes: (process.env.MCP_EMAIL_CACHE_MAILBOXES ?? 'INBOX')
+          .split(',')
+          .map((m) => m.trim())
+          .filter(Boolean),
+        window_days: parseInt(process.env.MCP_EMAIL_CACHE_WINDOW_DAYS ?? '90', 10),
+        body_messages: parseInt(process.env.MCP_EMAIL_CACHE_BODY_MESSAGES ?? '500', 10),
+        max_size_mb: parseInt(process.env.MCP_EMAIL_CACHE_MAX_SIZE_MB ?? '500', 10),
+        sync_interval: parseInt(process.env.MCP_EMAIL_CACHE_SYNC_INTERVAL ?? '300', 10),
+      },
       watcher: {
         enabled: process.env.MCP_EMAIL_WATCHER_ENABLED === 'true',
         folders: (process.env.MCP_EMAIL_WATCHER_FOLDERS ?? 'INBOX')
@@ -210,6 +260,34 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
     settings: {
       rateLimit: raw.settings.rate_limit,
       readOnly: raw.settings.read_only,
+      server: {
+        host: raw.settings.server.host,
+        port: raw.settings.server.port,
+        path: raw.settings.server.path,
+        token: raw.settings.server.token,
+        allowedHosts: raw.settings.server.allowed_hosts,
+      },
+      verification: {
+        enabled: raw.settings.verification.enabled,
+        autoCopy: raw.settings.verification.auto_copy,
+        confirmCopy: raw.settings.verification.confirm_copy,
+        notify: raw.settings.verification.notify,
+        copyLinks: raw.settings.verification.copy_links,
+        linkAction: raw.settings.verification.link_action,
+        clearAfterSeconds: raw.settings.verification.clear_after_seconds,
+        maxAgeMinutes: raw.settings.verification.max_age_minutes,
+        accounts: raw.settings.verification.accounts,
+        senderAllowlist: raw.settings.verification.sender_allowlist,
+        senderDenylist: raw.settings.verification.sender_denylist,
+      },
+      cache: {
+        enabled: raw.settings.cache.enabled,
+        mailboxes: raw.settings.cache.mailboxes,
+        windowDays: raw.settings.cache.window_days,
+        bodyMessages: raw.settings.cache.body_messages,
+        maxSizeMb: raw.settings.cache.max_size_mb,
+        syncInterval: raw.settings.cache.sync_interval,
+      },
       watcher: {
         enabled: raw.settings.watcher.enabled,
         folders: raw.settings.watcher.folders,
@@ -299,6 +377,51 @@ export async function saveConfig(
   await fs.writeFile(filePath, toml, 'utf-8');
 }
 
+export interface SaveResult {
+  /** Set when a previous file existed and was backed up. */
+  backupPath?: string;
+  /**
+   * True when this save overwrote a file that still carried `#` comments and
+   * no `.bak` existed yet — callers should surface a one-time notice, since
+   * smol-toml stringify cannot preserve comments.
+   */
+  commentsLost: boolean;
+}
+
+/**
+ * Validate, back up, then save.
+ *
+ * Zod-parses BEFORE any disk write (an invalid object never clobbers a valid
+ * file), then best-effort copies the previous file bytes to `<path>.bak` so a
+ * bad save (or the inevitable comment loss) is recoverable.
+ *
+ * Note: raw configs are fully materialized by the schema defaults, so every
+ * save writes every key explicitly — future default changes will not reach a
+ * file once it has been saved. That has always been true of every save path.
+ */
+export async function saveConfigValidated(
+  config: RawAppConfig,
+  filePath: string = CONFIG_FILE,
+): Promise<SaveResult> {
+  AppConfigFileSchema.parse(config);
+
+  let backupPath: string | undefined;
+  let commentsLost = false;
+  try {
+    const previous = await fs.readFile(filePath, 'utf-8');
+    const bak = `${filePath}.bak`;
+    const bakExisted = await configExists(bak);
+    await fs.writeFile(bak, previous, 'utf-8');
+    backupPath = bak;
+    commentsLost = !bakExisted && /^\s*#/m.test(previous);
+  } catch {
+    // First save or unreadable previous file — the backup is best-effort.
+  }
+
+  await saveConfig(config, filePath);
+  return { backupPath, commentsLost };
+}
+
 /**
  * Generate a template TOML config string.
  */
@@ -310,10 +433,47 @@ export function generateTemplate(): string {
 rate_limit = 10  # max emails per minute per account
 read_only = false  # set to true to disable all write operations
 
+# Local mirror — keeps a SQLite copy of mail under $XDG_CACHE_HOME/email-mcp
+# so reads are fast and still work while briefly offline. On by default; the
+# mirror is regenerable, so deleting it is always safe.
+# [settings.cache]
+# enabled = true          # set false to always read live from IMAP
+# mailboxes = ["INBOX"]   # synced in the background; others cache on read
+# window_days = 90        # how far back to mirror (0 = no limit)
+# body_messages = 500     # newest N messages to prefetch bodies for
+# max_size_mb = 500       # backstop on mirror size
+# sync_interval = 300     # seconds between background reconciles
+
+# Streamable HTTP server ('email-mcp http' / 'email-mcp server start').
+# Precedence: CLI flags > EMAIL_MCP_HTTP_* env > this section > defaults.
+# [settings.server]
+# host = "127.0.0.1"
+# port = 8080
+# path = "/mcp"
+# token = ""             # bearer token; empty = no auth (loopback only)
+# allowed_hosts = []     # Host-header allowlist for reverse proxies
+
 # [settings.watcher]
 # enabled = false        # enable IMAP IDLE real-time monitoring
 # folders = ["INBOX"]    # folders to watch per account
 # idle_timeout = 1740    # seconds (29 min, IMAP max is 30)
+
+# Verification codes — when a mail carrying an OTP/2FA code or sign-in link
+# arrives, copy it to the clipboard (concealed from clipboard managers) and
+# show a notification. Ambient catching needs [settings.watcher] enabled;
+# the get_verification_code tool works either way.
+# [settings.verification]
+# enabled = true
+# auto_copy = true           # copy caught codes/links to the clipboard
+# confirm_copy = false       # ask (native dialog) before touching the clipboard
+# notify = true              # desktop notification when something is caught
+# copy_links = true          # also catch magic links (when no code found)
+# link_action = "open"       # "open" = offer to open links in the browser, "copy" = clipboard
+# clear_after_seconds = 60   # auto-clear clipboard if unchanged (0 = never)
+# max_age_minutes = 10       # ignore messages older than this
+# accounts = []              # watch these accounts only (empty = all)
+# sender_allowlist = []      # e.g. ["*@github.com", "*@google.com"]
+# sender_denylist = []
 
 # [settings.hooks]
 # on_new_email = "notify"  # "triage" (AI) | "notify" (log) | "none"

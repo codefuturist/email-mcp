@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.codefuturist/email-mcp",
-  "description": "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage.",
+  "description": "IMAP/SMTP email MCP server — 52 tools, stdio + HTTP, IMAP IDLE push, multi-account, AI triage.",
   "repository": {
     "url": "https://github.com/codefuturist/email-mcp.git",
     "source": "github"
   },
-  "version": "0.2.3",
+  "version": "0.5.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@codefuturist/email-mcp",
-      "version": "0.2.3",
+      "version": "0.5.1",
       "runtimeHint": "npx",
       "commandArguments": ["stdio"],
       "transport": {

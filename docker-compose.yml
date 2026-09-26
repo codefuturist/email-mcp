@@ -1,7 +1,27 @@
 services:
+  # ── Method 1: stdio (default) ───────────────────────────────────────────────
   email-mcp:
     build: .
     image: codefuturist/email-mcp:latest
     stdin_open: true # required for stdio transport
+    volumes:
+      - ${EMAIL_MCP_CONFIG:-~/.config/email-mcp}:/home/node/.config/email-mcp:ro
+
+  # ── Method 2: Streamable HTTP (opt-in) ──────────────────────────────────────
+  # Start with:  docker compose --profile http up
+  # A bearer token is required to bind beyond loopback; clients then send
+  # `Authorization: Bearer $EMAIL_MCP_HTTP_TOKEN` to http://host:8080/mcp.
+  email-mcp-http:
+    build: .
+    image: codefuturist/email-mcp:latest
+    profiles: ["http"]
+    command: ["http", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      EMAIL_MCP_HTTP_TOKEN: ${EMAIL_MCP_HTTP_TOKEN:?set a bearer token for the HTTP transport}
+      # Host-header allowlist; `*` disables the check (rely on the token +
+      # your reverse proxy). Set to your public domain to re-enable it.
+      EMAIL_MCP_HTTP_ALLOWED_HOSTS: ${EMAIL_MCP_HTTP_ALLOWED_HOSTS:-*}
+    ports:
+      - "${EMAIL_MCP_HTTP_PORT:-8080}:8080"
     volumes:
       - ${EMAIL_MCP_CONFIG:-~/.config/email-mcp}:/home/node/.config/email-mcp:ro

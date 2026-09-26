@@ -4,11 +4,11 @@
  * Extracts structured calendar events from ICS content using node-ical.
  */
 
+import type { CalendarComponent } from 'node-ical';
 import ical from 'node-ical';
-
 import type { CalendarEvent, EmailAddress } from '../types/index.js';
 
-type IcalComponent = ical.CalendarComponent;
+type IcalComponent = CalendarComponent;
 
 export default class CalendarService {
   /**
@@ -27,7 +27,7 @@ export default class CalendarService {
     });
 
     Object.values(parsed).forEach((comp: IcalComponent | undefined) => {
-      if (!comp || comp.type !== 'VEVENT') return;
+      if (comp?.type !== 'VEVENT') return;
 
       const event = comp as unknown as Record<string, unknown>;
       const start = event.start as Date | undefined;

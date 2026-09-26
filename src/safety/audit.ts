@@ -15,7 +15,16 @@ import type { AuditEntry } from '../types/index.js';
 const AUDIT_LOG_PATH = path.join(xdg.data, 'audit.log');
 
 /** Fields redacted from audit params to protect sensitive data. */
-const REDACTED_FIELDS = new Set(['password', 'body', 'bodyText', 'bodyHtml', 'content_base64']);
+const REDACTED_FIELDS = new Set([
+  'password',
+  'body',
+  'bodyText',
+  'bodyHtml',
+  'content_base64',
+  // Verification secrets — never let a caught OTP/magic link reach the audit log.
+  'code',
+  'link',
+]);
 
 function redactParams(params: Record<string, unknown>): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};

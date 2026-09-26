@@ -4,39 +4,18 @@
  *
  * Subcommands:
  *   stdio     Run as MCP server over stdio (default)
- *   http      Run as MCP server over Streamable HTTP (port 8080 by default)
- *   setup     Interactive account setup wizard
+ *   http      Run as MCP server over Streamable HTTP (networked)
+ *   account   Account management (list, add, edit, delete)
  *   test      Test IMAP/SMTP connections
  *   config    Config management (show, path, init)
  *   scheduler Email scheduling management
  */
 
-import { randomUUID } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createServer as createHttpServer } from 'node:http';
-
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-
-import { loadConfig } from './config/loader.js';
-import ConnectionManager from './connections/manager.js';
-import { bindServer, markInitialized, mcpLog } from './logging.js';
-import registerAllPrompts from './prompts/register.js';
-import registerAllResources from './resources/register.js';
-import RateLimiter from './safety/rate-limiter.js';
-import createServer, { PKG_VERSION } from './server.js';
-import CalendarService from './services/calendar.service.js';
-import HooksService from './services/hooks.service.js';
-import ImapService from './services/imap.service.js';
-import LocalCalendarService from './services/local-calendar.service.js';
-import OAuthService from './services/oauth.service.js';
-import RemindersService from './services/reminders.service.js';
-import SchedulerService from './services/scheduler.service.js';
-import SmtpService from './services/smtp.service.js';
-import TemplateService from './services/template.service.js';
-import WatcherService from './services/watcher.service.js';
-import registerAllTools from './tools/register.js';
+// Everything heavy is imported lazily inside each command arm: loading the
+// MCP SDK + service graph costs ~165 ms, which must not tax `--version`,
+// `config …`, or the shell-completion helper (TAB latency).
+import type { BackgroundHandle } from './app.js';
+import { PKG_VERSION } from './version.js';
 
 const HELP = `
 email-mcp — Email MCP Server (IMAP + SMTP)
@@ -46,7 +25,8 @@ Usage:
 
 Commands:
   stdio       Run as MCP server over stdio (default)
-  http [port] Run as MCP server over Streamable HTTP (default port: 8080)
+  http        Run as MCP server over Streamable HTTP (networked)
+  server      Lifecycle for an always-on HTTP server (start, stop, status, restart, logs)
   account     Account management (list, add, edit, delete)
   setup       Alias for 'account add'
   test        Test connections for all or a specific account
@@ -54,12 +34,18 @@ Commands:
   config      Config management (show, edit, path, init)
   scheduler   Email scheduling management (check, list, install, uninstall, status)
   notify      Test and diagnose desktop notifications
+  completion  Print shell completion script (zsh, bash, fish)
   help        Show this help message
 
 Examples:
   email-mcp                         # Start MCP server (stdio)
-  email-mcp http                    # Start HTTP server on port 8080
-  email-mcp http 9090               # Start HTTP server on port 9090
+  email-mcp http --port 8080         # Start Streamable HTTP server on :8080/mcp
+  email-mcp http --host 0.0.0.0 --port 8080   # Bind all interfaces (requires a token)
+  email-mcp server start             # Start detached (watcher keeps running, no client needed)
+  email-mcp server start --attach    # Same, but in the foreground (Ctrl-C stops)
+  email-mcp server status            # Is it running? (pid, address, health)
+  email-mcp server stop              # Stop the detached server
+  email-mcp server install           # macOS login item (launchd) — survives reboots
   email-mcp account list             # List configured accounts
   email-mcp account add              # Add a new email account
   email-mcp account edit personal    # Edit an account
@@ -71,301 +57,47 @@ Examples:
   email-mcp install status           # Show client registration status
   email-mcp install remove           # Unregister from MCP clients
   email-mcp config show              # Show config (passwords masked)
-  email-mcp config edit              # Edit global settings
+  email-mcp config edit              # Edit settings interactively (pick a section)
+  email-mcp config edit verification # Jump straight into a section
+  email-mcp config validate          # Syntax, schema, typo'd keys, consistency
   email-mcp config path              # Print config file path
   email-mcp config init              # Create template config
   email-mcp scheduler check          # Send overdue scheduled emails
   email-mcp scheduler install        # Install OS periodic check
   email-mcp notify test              # Send a test notification
   email-mcp notify status            # Check notification platform support
+  email-mcp completion zsh           # Shell completion (source <(…) in ~/.zshrc)
 `.trim();
 
 async function runServer(): Promise<void> {
-  const config = await loadConfig();
+  const [{ serveStdio }, { buildServer, buildServices, startBackgroundServices }] =
+    await Promise.all([import('@modelcontextprotocol/server/stdio'), import('./app.js')]);
+  const services = await buildServices();
 
-  const oauthService = new OAuthService();
-  const connections = new ConnectionManager(config.accounts, oauthService);
-  const rateLimiter = new RateLimiter(config.settings.rateLimit);
-  const imapService = new ImapService(connections);
-  const smtpService = new SmtpService(connections, rateLimiter, imapService);
-  const templateService = new TemplateService();
-  const calendarService = new CalendarService();
-  const localCalendarService = new LocalCalendarService();
-  const remindersService = new RemindersService();
-  const schedulerService = new SchedulerService(smtpService, imapService);
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
-  const hooksService = new HooksService(config.settings.hooks, imapService);
+  let background: BackgroundHandle | undefined;
+  let started = false;
 
-  const server = createServer();
-  bindServer(server);
-
-  registerAllTools(
-    server,
-    connections,
-    imapService,
-    smtpService,
-    config,
-    templateService,
-    calendarService,
-    localCalendarService,
-    remindersService,
-    schedulerService,
-    watcherService,
-    hooksService,
-  );
-  registerAllResources(server, connections, imapService, templateService, schedulerService);
-  registerAllPrompts(server);
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  // --- Post-handshake initialization ----------------------------------------
-  // Everything below is deferred until the client completes the MCP
-  // `initialize` / `initialized` handshake.  This prevents notifications
-  // from being written to stdout before the client is ready, which would
-  // crash clients like Vibe, and ensures `getClientCapabilities()` returns
-  // the real capabilities (including `sampling` support).
-  // --------------------------------------------------------------------------
-
-  let schedulerInterval: ReturnType<typeof setInterval> | undefined;
-
-  const lowLevelServer = server.server;
-
-  lowLevelServer.oninitialized = () => {
-    markInitialized();
-
-    // eslint-disable-next-line no-void
-    void (async () => {
-      try {
-        const clientCaps = lowLevelServer.getClientCapabilities?.() ?? {};
-        hooksService.start(lowLevelServer, { sampling: clientCaps.sampling != null });
-
-        await watcherService.start();
-
-        await mcpLog('info', 'server', 'Email MCP server started');
-
-        // Check for overdue scheduled emails on startup
-        try {
-          const result = await schedulerService.checkAndSend();
-          if (result.sent > 0) {
-            await mcpLog('info', 'scheduler', `Sent ${result.sent} overdue email(s) on startup`);
-          }
-        } catch {
-          // Non-fatal: scheduler check failure shouldn't prevent server start
-        }
-
-        // Periodic scheduler check every 60 seconds
-        schedulerInterval = setInterval(async () => {
-          try {
-            await schedulerService.checkAndSend();
-          } catch {
-            // Silent — don't spam logs
-          }
-        }, 60_000);
-      } catch (err) {
-        // Log to stderr — mcpLog may not be safe if init itself errored
-        process.stderr.write(
-          `[email-mcp] post-init error: ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-    })();
-  };
-
-  // Graceful shutdown
-  const shutdown = async () => {
-    if (schedulerInterval) clearInterval(schedulerInterval);
-    hooksService.stop();
-    await watcherService.stop();
-    await connections.closeAll();
-    await server.close();
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-}
-
-async function readBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
-
-async function runHttpServer(port: number): Promise<void> {
-  const config = await loadConfig();
-
-  // Shared services — created once for the process lifetime
-  const oauthService = new OAuthService();
-  const connections = new ConnectionManager(config.accounts, oauthService);
-  const rateLimiter = new RateLimiter(config.settings.rateLimit);
-  const imapService = new ImapService(connections);
-  const smtpService = new SmtpService(connections, rateLimiter, imapService);
-  const templateService = new TemplateService();
-  const calendarService = new CalendarService();
-  const localCalendarService = new LocalCalendarService();
-  const remindersService = new RemindersService();
-  const schedulerService = new SchedulerService(smtpService, imapService);
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts);
-  const hooksService = new HooksService(config.settings.hooks, imapService);
-
-  // Per-session factory: tools share service instances but each MCP session
-  // needs its own McpServer because the SDK binds one transport per server.
-  function buildMcpSession() {
-    const server = createServer();
-    bindServer(server);
-    registerAllTools(
-      server,
-      connections,
-      imapService,
-      smtpService,
-      config,
-      templateService,
-      calendarService,
-      localCalendarService,
-      remindersService,
-      schedulerService,
-      watcherService,
-      hooksService,
-    );
-    registerAllResources(server, connections, imapService, templateService, schedulerService);
-    registerAllPrompts(server);
+  // serveStdio owns the transport: it selects the protocol era from the
+  // opening exchange, pins one instance from the factory for the connection,
+  // and serves both 2025- and 2026-era clients (legacy shim, default). For
+  // stdio there is exactly one connection, so we start the process-level
+  // background services the first time the factory builds a server — parity
+  // with the old post-`initialized` hook, minus the stateful handshake dance
+  // the 2026-07-28 spec removed.
+  const handle = serveStdio(() => {
+    const server = buildServer(services);
+    if (!started) {
+      started = true;
+      background = startBackgroundServices(services, server.server);
+    }
     return server;
-  }
-
-  const transports = new Map<string, StreamableHTTPServerTransport>();
-
-  const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, version: PKG_VERSION }));
-      return;
-    }
-
-    if (req.url !== '/mcp') {
-      res.writeHead(404);
-      res.end('Not Found');
-      return;
-    }
-
-    let body: unknown;
-    if (req.method === 'POST') {
-      const raw = await readBody(req);
-      if (raw.length > 0) {
-        try {
-          body = JSON.parse(raw.toString());
-        } catch {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              error: { code: -32700, message: 'Parse error' },
-              id: null,
-            }),
-          );
-          return;
-        }
-      }
-    }
-
-    const sessionIdHeader = req.headers['mcp-session-id'];
-    const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
-    let transport: StreamableHTTPServerTransport;
-
-    const existing = sessionId ? transports.get(sessionId) : undefined;
-    if (existing) {
-      transport = existing;
-    } else if (!sessionId && req.method === 'POST' && isInitializeRequest(body)) {
-      const newTransport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (sid) => {
-          transports.set(sid, newTransport);
-        },
-      });
-      newTransport.onclose = () => {
-        const sid = newTransport.sessionId;
-        if (sid) transports.delete(sid);
-      };
-      const mcpServer = buildMcpSession();
-      await mcpServer.connect(newTransport);
-
-      // Register hooks on the *first* client init for this session so the
-      // HTTP path also wires up email:new → sampling/createMessage. Without
-      // this, only stdio mode triggered the hooks (see 36eb8ca on main).
-      const ls = mcpServer.server;
-      ls.oninitialized = () => {
-        markInitialized();
-        // eslint-disable-next-line no-void
-        void (async () => {
-          try {
-            const clientCaps = ls.getClientCapabilities?.() ?? {};
-            hooksService.start(ls, { sampling: clientCaps.sampling != null });
-            await mcpLog('info', 'server', 'Email MCP server ready (HTTP mode)');
-          } catch (err) {
-            process.stderr.write(
-              `[email-mcp] hooks init error: ${err instanceof Error ? err.message : String(err)}\n`,
-            );
-          }
-        })();
-      };
-
-      transport = newTransport;
-    } else {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          error: {
-            code: -32000,
-            message: 'Bad Request: provide mcp-session-id or send an initialize request',
-          },
-          id: null,
-        }),
-      );
-      return;
-    }
-
-    await transport.handleRequest(req, res, body);
   });
 
-  await watcherService.start();
-
-  const checkInterval = setInterval(async () => {
-    try {
-      await schedulerService.checkAndSend();
-    } catch {
-      // Silent
-    }
-  }, 60_000);
-
-  try {
-    const result = await schedulerService.checkAndSend();
-    if (result.sent > 0) {
-      process.stderr.write(`[scheduler] Sent ${result.sent} overdue email(s) on startup\n`);
-    }
-  } catch {
-    // Non-fatal
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    httpServer.listen(port, () => {
-      process.stderr.write(`email-mcp HTTP server listening on :${port}\n`);
-      process.stderr.write(`  Endpoint : http://0.0.0.0:${port}/mcp\n`);
-      process.stderr.write(`  Health   : http://0.0.0.0:${port}/health\n`);
-      resolve();
-    });
-    httpServer.once('error', reject);
-  });
-
+  // Graceful shutdown.
   const shutdown = async () => {
-    clearInterval(checkInterval);
-    hooksService.stop();
-    await watcherService.stop();
-    // Close all transports concurrently; errors are ignored individually.
-    await Promise.allSettled(Array.from(transports.values(), async (t) => t.close()));
-    await connections.closeAll();
-    httpServer.close();
+    if (background) await background.stop();
+    await services.connections.closeAll();
+    await handle.close();
   };
 
   process.on('SIGINT', shutdown);
@@ -381,13 +113,38 @@ async function main(): Promise<void> {
       break;
 
     case 'http': {
-      const portArg = process.argv[3];
-      const port = portArg !== undefined ? Number.parseInt(portArg, 10) : 8080;
-      if (Number.isNaN(port) || port < 1 || port > 65535) {
-        console.error(`Invalid port: ${portArg}`);
-        throw new Error(`Invalid port: ${portArg}`);
+      const { default: runHttp } = await import('./cli/http.js');
+      await runHttp(process.argv.slice(3));
+      break;
+    }
+
+    case 'server': {
+      const { default: runServerCommand } = await import('./cli/server-commands.js');
+      await runServerCommand(process.argv.slice(3));
+      break;
+    }
+
+    case 'completion': {
+      const { default: runCompletionCommand } = await import('./cli/completion.js');
+      runCompletionCommand(process.argv[3]);
+      break;
+    }
+
+    // Hidden helper the completion scripts call for dynamic candidates.
+    // Must never fail or prompt — silence is a valid completion result.
+    case '__complete': {
+      try {
+        const { completionCandidates } = await import('./cli/completion.js');
+        const kind = process.argv[3] as 'accounts' | 'sections';
+        const needsConfig = kind === 'accounts';
+        const { loadConfig } = await import('./config/loader.js');
+        const config = needsConfig ? await loadConfig().catch(() => undefined) : undefined;
+        for (const candidate of completionCandidates(kind, config)) {
+          console.log(candidate);
+        }
+      } catch {
+        // Completion must stay silent on any failure.
       }
-      await runHttpServer(port);
       break;
     }
 
@@ -411,7 +168,7 @@ async function main(): Promise<void> {
 
     case 'config': {
       const { default: runConfigCommand } = await import('./cli/config-commands.js');
-      await runConfigCommand(process.argv[3]);
+      await runConfigCommand(process.argv[3], process.argv[4]);
       break;
     }
 

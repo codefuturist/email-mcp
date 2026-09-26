@@ -9,6 +9,7 @@
 
 import type { ImapFlow } from 'imapflow';
 import type { LabelInfo, LabelStrategyType } from '../types/index.js';
+import { imapCommand } from '../utils/imap-error.js';
 
 // ---------------------------------------------------------------------------
 // Strategy interface
@@ -50,12 +51,25 @@ function createProtonMailStrategy(): LabelStrategy {
       const targetPath = `${LABELS_PREFIX}${label}`;
       const lock = await client.getMailboxLock(mailbox);
       try {
-        const result = await client.messageCopy(emailId, targetPath, { uid: true });
+        const result = await imapCommand(`Adding label "${label}"`, () =>
+          client.messageCopy(emailId, targetPath, { uid: true }),
+        );
         if (!result) {
           throw new Error(
             `Server rejected adding label "${label}" (COPY to ${targetPath} failed).`,
           );
         }
+      } catch (err) {
+        // On this server a label is a folder, so a missing target is the most
+        // common failure and has a concrete remedy.
+        const text = err instanceof Error ? err.message : String(err);
+        if (/no such mailbox|does not exist|nonexistent/i.test(text)) {
+          throw new Error(
+            `Label "${label}" does not exist on this account. Create it first with create_label.`,
+            { cause: err },
+          );
+        }
+        throw err;
       } finally {
         lock.release();
       }
@@ -82,7 +96,9 @@ function createProtonMailStrategy(): LabelStrategy {
       }
 
       // Find the email's UID inside the label folder and delete it
-      const labelLock = await client.getMailboxLock(labelPath);
+      const labelLock = await imapCommand(`Opening label folder "${labelPath}"`, () =>
+        client.getMailboxLock(labelPath),
+      );
       try {
         const results = await client.search({ header: { 'message-id': messageId } }, { uid: true });
         if (!results || !Array.isArray(results) || results.length === 0) {
@@ -101,11 +117,15 @@ function createProtonMailStrategy(): LabelStrategy {
     },
 
     createLabel: async (client, name) => {
-      await client.mailboxCreate(`${LABELS_PREFIX}${name}`);
+      await imapCommand(`Creating label "${name}"`, () =>
+        client.mailboxCreate(`${LABELS_PREFIX}${name}`),
+      );
     },
 
     deleteLabel: async (client, name) => {
-      await client.mailboxDelete(`${LABELS_PREFIX}${name}`);
+      await imapCommand(`Deleting label "${name}"`, () =>
+        client.mailboxDelete(`${LABELS_PREFIX}${name}`),
+      );
     },
   };
 }
@@ -170,11 +190,11 @@ function createGmailStrategy(): LabelStrategy {
     },
 
     createLabel: async (client, name) => {
-      await client.mailboxCreate(name);
+      await imapCommand(`Creating label "${name}"`, () => client.mailboxCreate(name));
     },
 
     deleteLabel: async (client, name) => {
-      await client.mailboxDelete(name);
+      await imapCommand(`Deleting label "${name}"`, () => client.mailboxDelete(name));
     },
   };
 }

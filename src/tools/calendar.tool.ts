@@ -13,7 +13,7 @@
 
 import { join } from 'node:path';
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { CALENDAR_ATTACHMENTS_DIR } from '../config/xdg.js';
@@ -40,15 +40,19 @@ export default function registerCalendarTools(
   // extract_calendar
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'extract_calendar',
-    'Extract calendar events (ICS/iCalendar) from an email. Returns structured event data including time, location, attendees, and status.',
     {
-      account: z.string().describe('Account name'),
-      email_id: z.string().describe('Email UID'),
-      mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
+      title: 'Extract calendar',
+      description:
+        'Extract calendar events (ICS/iCalendar) from an email. Returns structured event data including time, location, attendees, and status.',
+      inputSchema: z.object({
+        account: z.string().describe('Account name'),
+        email_id: z.string().describe('Email UID'),
+        mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ account, email_id: emailId, mailbox }) => {
       const email = await imapService.getEmail(account, emailId, mailbox);
       const icsContents = await imapService.getCalendarParts(account, mailbox, emailId);
@@ -94,41 +98,44 @@ export default function registerCalendarTools(
   // add_to_calendar
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'add_to_calendar',
-    [
-      'Add an email event to the local calendar (macOS Calendar.app / Linux via xdg-open).',
-      'Automatically extracts event data from the email: ICS attachments, meeting URL (Zoom/Teams/Meet),',
-      'conference dial-in / ID / passcode, attendees, and email body excerpt.',
-      'All relevant email attachments (PDFs, docs, etc.) are saved locally and linked in the event notes.',
-      'A native confirmation dialog is shown on macOS before the event is written.',
-      'Returns one of: added | cancelled | timed_out | no_display.',
-    ].join(' '),
     {
-      account: z.string().describe('Account name'),
-      email_id: z.string().describe('Email UID'),
-      mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
-      calendar_name: z
-        .string()
-        .optional()
-        .describe('Target calendar name (empty = default calendar)'),
-      alarm_minutes: z
-        .number()
-        .int()
-        .min(0)
-        .max(1440)
-        .default(15)
-        .describe('Minutes before event to show an alert (default: 15)'),
-      save_attachments: z
-        .boolean()
-        .default(true)
-        .describe('Save non-ICS email attachments locally and link them in the event notes'),
-      confirm: z
-        .boolean()
-        .default(true)
-        .describe('Show native confirmation dialog before adding (default: true)'),
+      title: 'Add to calendar',
+      description: [
+        'Add an email event to the local calendar (macOS Calendar.app / Linux via xdg-open).',
+        'Automatically extracts event data from the email: ICS attachments, meeting URL (Zoom/Teams/Meet),',
+        'conference dial-in / ID / passcode, attendees, and email body excerpt.',
+        'All relevant email attachments (PDFs, docs, etc.) are saved locally and linked in the event notes.',
+        'A native confirmation dialog is shown on macOS before the event is written.',
+        'Returns one of: added | cancelled | timed_out | no_display.',
+      ].join(' '),
+      inputSchema: z.object({
+        account: z.string().describe('Account name'),
+        email_id: z.string().describe('Email UID'),
+        mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
+        calendar_name: z
+          .string()
+          .optional()
+          .describe('Target calendar name (empty = default calendar)'),
+        alarm_minutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(1440)
+          .default(15)
+          .describe('Minutes before event to show an alert (default: 15)'),
+        save_attachments: z
+          .boolean()
+          .default(true)
+          .describe('Save non-ICS email attachments locally and link them in the event notes'),
+        confirm: z
+          .boolean()
+          .default(true)
+          .describe('Show native confirmation dialog before adding (default: true)'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    { readOnlyHint: false, destructiveHint: false },
     async ({
       account,
       email_id: emailId,
@@ -286,15 +293,17 @@ export default function registerCalendarTools(
   // check_calendar_permissions
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'check_calendar_permissions',
-    [
-      'Check whether the local calendar is accessible.',
-      'On macOS, verifies Calendar.app access (requires Privacy & Security → Calendars permission).',
-      'Returns granted status and step-by-step setup instructions if access is denied.',
-    ].join(' '),
-    {},
-    { readOnlyHint: true, destructiveHint: false },
+    {
+      title: 'Check calendar permissions',
+      description: [
+        'Check whether the local calendar is accessible.',
+        'On macOS, verifies Calendar.app access (requires Privacy & Security → Calendars permission).',
+        'Returns granted status and step-by-step setup instructions if access is denied.',
+      ].join(' '),
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
     async () => {
       const [calResult, remResult] = await Promise.all([
         localCalendarService.checkPermissions(),
@@ -327,14 +336,16 @@ export default function registerCalendarTools(
   // list_calendars
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'list_calendars',
-    [
-      'List all available local calendars (macOS Calendar.app / Linux default).',
-      'Use the returned calendar names with add_to_calendar to target a specific calendar.',
-    ].join(' '),
-    {},
-    { readOnlyHint: true, destructiveHint: false },
+    {
+      title: 'List calendars',
+      description: [
+        'List all available local calendars (macOS Calendar.app / Linux default).',
+        'Use the returned calendar names with add_to_calendar to target a specific calendar.',
+      ].join(' '),
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
     async () => {
       const calendars = await localCalendarService.listCalendars();
       if (calendars.length === 0) {
@@ -359,41 +370,44 @@ export default function registerCalendarTools(
   // list_events
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'list_events',
-    [
-      'List local calendar events with optional filters.',
-      'Search by title, date range, or calendar name.',
-      'Use to check for existing events before creating new ones, or to verify a recently added event.',
-      'Returns event id, title, start/end time, location, and calendar name.',
-    ].join(' '),
     {
-      title: z
-        .string()
-        .optional()
-        .describe('Filter events whose title contains this text (case-insensitive)'),
-      from: z
-        .string()
-        .optional()
-        .describe(
-          'Show events on or after this date (ISO 8601, e.g. 2026-02-19). Defaults to 7 days ago.',
-        ),
-      to: z
-        .string()
-        .optional()
-        .describe(
-          'Show events on or before this date (ISO 8601, e.g. 2026-02-28). Defaults to 30 days from now.',
-        ),
-      calendar_name: z.string().optional().describe('Restrict to a specific calendar by name'),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe('Maximum number of results (default: 20)'),
+      title: 'List events',
+      description: [
+        'List local calendar events with optional filters.',
+        'Search by title, date range, or calendar name.',
+        'Use to check for existing events before creating new ones, or to verify a recently added event.',
+        'Returns event id, title, start/end time, location, and calendar name.',
+      ].join(' '),
+      inputSchema: z.object({
+        title: z
+          .string()
+          .optional()
+          .describe('Filter events whose title contains this text (case-insensitive)'),
+        from: z
+          .string()
+          .optional()
+          .describe(
+            'Show events on or after this date (ISO 8601, e.g. 2026-02-19). Defaults to 7 days ago.',
+          ),
+        to: z
+          .string()
+          .optional()
+          .describe(
+            'Show events on or before this date (ISO 8601, e.g. 2026-02-28). Defaults to 30 days from now.',
+          ),
+        calendar_name: z.string().optional().describe('Restrict to a specific calendar by name'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(20)
+          .describe('Maximum number of results (default: 20)'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ title, from, to, calendar_name: calendarName, limit }) => {
       const events = await localCalendarService.listEvents({
         title,
@@ -435,33 +449,36 @@ export default function registerCalendarTools(
   // list_reminders
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'list_reminders',
-    [
-      'List reminders from macOS Reminders.app with optional filters.',
-      'Search by title or list name. By default only shows incomplete reminders.',
-      'Use to check for existing reminders before creating new ones, or to verify a recently added reminder.',
-      'Returns reminder id, title, due date, completion status, priority, and list name.',
-    ].join(' '),
     {
-      title: z
-        .string()
-        .optional()
-        .describe('Filter reminders whose title contains this text (case-insensitive)'),
-      list_name: z.string().optional().describe('Restrict to a specific Reminders list by name'),
-      include_completed: z
-        .boolean()
-        .default(false)
-        .describe('Include completed reminders (default: false)'),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe('Maximum number of results (default: 20)'),
+      title: 'List reminders',
+      description: [
+        'List reminders from macOS Reminders.app with optional filters.',
+        'Search by title or list name. By default only shows incomplete reminders.',
+        'Use to check for existing reminders before creating new ones, or to verify a recently added reminder.',
+        'Returns reminder id, title, due date, completion status, priority, and list name.',
+      ].join(' '),
+      inputSchema: z.object({
+        title: z
+          .string()
+          .optional()
+          .describe('Filter reminders whose title contains this text (case-insensitive)'),
+        list_name: z.string().optional().describe('Restrict to a specific Reminders list by name'),
+        include_completed: z
+          .boolean()
+          .default(false)
+          .describe('Include completed reminders (default: false)'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(20)
+          .describe('Maximum number of results (default: 20)'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ title, list_name: listName, include_completed: includeCompleted, limit }) => {
       const reminders = await remindersService.listReminders({
         title,
@@ -503,38 +520,41 @@ export default function registerCalendarTools(
   // create_reminder
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'create_reminder',
-    [
-      'Create a reminder in macOS Reminders.app from an email.',
-      'Shows a native confirmation dialog before adding.',
-      'Use for action items, deadlines, and follow-up tasks extracted from emails.',
-      'Use analyze_email_for_scheduling first to let the AI decide if a reminder is appropriate.',
-    ].join(' '),
     {
-      account: z.string().describe('Email account name'),
-      email_id: z.string().describe('Email ID from list_emails_metadata'),
-      mailbox: z.string().default('INBOX').describe('Mailbox containing the email'),
-      title: z.string().optional().describe('Reminder title (defaults to email subject)'),
-      notes: z
-        .string()
-        .optional()
-        .describe('Reminder body/notes (defaults to auto-built from email)'),
-      due_date: z
-        .string()
-        .optional()
-        .describe('ISO 8601 due date (e.g. 2026-02-20T10:00:00). Leave empty for no due date.'),
-      priority: z
-        .enum(['none', 'low', 'medium', 'high'])
-        .default('none')
-        .describe('Reminder priority'),
-      list_name: z.string().optional().describe('Reminders list name (default list if omitted)'),
-      confirm: z
-        .boolean()
-        .default(true)
-        .describe('Show native confirmation dialog before adding (default: true)'),
+      title: 'Create reminder',
+      description: [
+        'Create a reminder in macOS Reminders.app from an email.',
+        'Shows a native confirmation dialog before adding.',
+        'Use for action items, deadlines, and follow-up tasks extracted from emails.',
+        'Use analyze_email_for_scheduling first to let the AI decide if a reminder is appropriate.',
+      ].join(' '),
+      inputSchema: z.object({
+        account: z.string().describe('Email account name'),
+        email_id: z.string().describe('Email ID from list_emails_metadata'),
+        mailbox: z.string().default('INBOX').describe('Mailbox containing the email'),
+        title: z.string().optional().describe('Reminder title (defaults to email subject)'),
+        notes: z
+          .string()
+          .optional()
+          .describe('Reminder body/notes (defaults to auto-built from email)'),
+        due_date: z
+          .string()
+          .optional()
+          .describe('ISO 8601 due date (e.g. 2026-02-20T10:00:00). Leave empty for no due date.'),
+        priority: z
+          .enum(['none', 'low', 'medium', 'high'])
+          .default('none')
+          .describe('Reminder priority'),
+        list_name: z.string().optional().describe('Reminders list name (default list if omitted)'),
+        confirm: z
+          .boolean()
+          .default(true)
+          .describe('Show native confirmation dialog before adding (default: true)'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    { readOnlyHint: false, destructiveHint: false },
     async ({
       account,
       email_id: emailId,
@@ -582,20 +602,23 @@ export default function registerCalendarTools(
   // analyze_email_for_scheduling
   // ---------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     'analyze_email_for_scheduling',
-    [
-      'Analyze an email to detect calendar events and/or reminder-worthy content.',
-      'Returns structured analysis so the AI can decide whether to call add_to_calendar,',
-      'create_reminder, both, or neither.',
-      'Use this as the first step before creating any scheduling resource.',
-    ].join(' '),
     {
-      account: z.string().describe('Email account name'),
-      email_id: z.string().describe('Email ID from list_emails_metadata'),
-      mailbox: z.string().default('INBOX').describe('Mailbox containing the email'),
+      title: 'Analyze email for scheduling',
+      description: [
+        'Analyze an email to detect calendar events and/or reminder-worthy content.',
+        'Returns structured analysis so the AI can decide whether to call add_to_calendar,',
+        'create_reminder, both, or neither.',
+        'Use this as the first step before creating any scheduling resource.',
+      ].join(' '),
+      inputSchema: z.object({
+        account: z.string().describe('Email account name'),
+        email_id: z.string().describe('Email ID from list_emails_metadata'),
+        mailbox: z.string().default('INBOX').describe('Mailbox containing the email'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ account, email_id: emailId, mailbox }) => {
       const email = await imapService.getEmail(account, emailId, mailbox);
       const bodyText = email.bodyText ?? '';

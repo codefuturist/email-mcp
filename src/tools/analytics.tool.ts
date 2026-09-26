@@ -4,24 +4,28 @@
  * Provides email analytics and statistics for a mailbox.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type ImapService from '../services/imap.service.js';
 
 export default function registerAnalyticsTools(server: McpServer, imapService: ImapService): void {
-  server.tool(
+  server.registerTool(
     'get_email_stats',
-    'Get email statistics and analytics for a mailbox. Shows volume, top senders, daily trends, and read/flagged counts.',
     {
-      account: z.string().describe('Account name'),
-      period: z
-        .enum(['day', 'week', 'month'])
-        .default('week')
-        .describe('Time period: day, week, or month'),
-      mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
+      title: 'Get email stats',
+      description:
+        'Get email statistics and analytics for a mailbox. Shows volume, top senders, daily trends, and read/flagged counts.',
+      inputSchema: z.object({
+        account: z.string().describe('Account name'),
+        period: z
+          .enum(['day', 'week', 'month'])
+          .default('week')
+          .describe('Time period: day, week, or month'),
+        mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ account, period, mailbox }) => {
       const stats = await imapService.getEmailStats(account, mailbox, period);
 

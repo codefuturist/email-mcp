@@ -4,7 +4,7 @@
  * Connection health diagnostics for email accounts.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type ConnectionManager from '../connections/manager.js';
@@ -15,13 +15,17 @@ export default function registerHealthTools(
   connections: ConnectionManager,
   imapService: ImapService,
 ): void {
-  server.tool(
+  server.registerTool(
     'check_health',
-    'Check connection health, quota, and capabilities for email accounts. Useful for diagnosing issues.',
     {
-      account: z.string().optional().describe('Account name (checks all accounts if omitted)'),
+      title: 'Check health',
+      description:
+        'Check connection health, quota, and capabilities for email accounts. Useful for diagnosing issues.',
+      inputSchema: z.object({
+        account: z.string().optional().describe('Account name (checks all accounts if omitted)'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false },
     async ({ account }) => {
       const names = account ? [account] : connections.getAccountNames();
 

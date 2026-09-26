@@ -4,8 +4,8 @@
  * Dynamic resource providing lightweight daily inbox statistics.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import type ConnectionManager from '../connections/manager.js';
 import type ImapService from '../services/imap.service.js';
@@ -18,7 +18,7 @@ export default function registerStatsResource(
   const names = connections.getAccountNames();
   const accounts = names.map((name) => connections.getAccount(name));
 
-  server.resource(
+  server.registerResource(
     'stats',
     new ResourceTemplate('email://{account}/stats', {
       list: async () => ({
@@ -36,7 +36,10 @@ export default function registerStatsResource(
     async (uri, { account }) => {
       const accountName = account as string;
 
-      // Lightweight STATUS query (fast, no envelope fetch)
+      // NOT a lightweight STATUS query, despite what this comment used to
+      // claim: getEmailStats runs SEARCH SINCE and then fetches envelope,
+      // flags and bodyStructure for every UID in the window, unbounded.
+      // On a busy INBOX this is one of the most expensive reads in the server.
       const stats = await imapService.getEmailStats(accountName, 'INBOX', 'day');
 
       const quota = await imapService.getQuota(accountName);

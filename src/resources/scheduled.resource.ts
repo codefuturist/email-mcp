@@ -4,7 +4,7 @@
  * Static resource listing pending scheduled emails.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 
 import type SchedulerService from '../services/scheduler.service.js';
 
@@ -12,7 +12,7 @@ export default function registerScheduledResource(
   server: McpServer,
   schedulerService: SchedulerService,
 ): void {
-  server.resource(
+  server.registerResource(
     'scheduled',
     'email://scheduled',
     { description: 'List of pending scheduled emails' },

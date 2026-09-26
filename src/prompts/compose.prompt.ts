@@ -4,29 +4,33 @@
  * AI-assisted email composition with tone control and context awareness.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 export default function registerComposePrompts(server: McpServer): void {
   // ---------------------------------------------------------------------------
   // compose_reply
   // ---------------------------------------------------------------------------
-  server.prompt(
+  server.registerPrompt(
     'compose_reply',
-    'Draft a professional reply to an email with tone control. Fetches the original email and optionally the full thread for context.',
     {
-      account: z.string().describe('Account name'),
-      email_id: z.string().describe('Email ID to reply to (from list_emails)'),
-      mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
-      intent: z
-        .string()
-        .describe(
-          'What you want to communicate, e.g., "accept the meeting", "decline politely", "request more details"',
-        ),
-      tone: z
-        .enum(['formal', 'friendly', 'brief'])
-        .default('friendly')
-        .describe('Tone of the reply'),
+      title: 'Compose reply',
+      description:
+        'Draft a professional reply to an email with tone control. Fetches the original email and optionally the full thread for context.',
+      argsSchema: z.object({
+        account: z.string().describe('Account name'),
+        email_id: z.string().describe('Email ID to reply to (from list_emails)'),
+        mailbox: z.string().default('INBOX').describe('Mailbox path (default: INBOX)'),
+        intent: z
+          .string()
+          .describe(
+            'What you want to communicate, e.g., "accept the meeting", "decline politely", "request more details"',
+          ),
+        tone: z
+          .enum(['formal', 'friendly', 'brief'])
+          .default('friendly')
+          .describe('Tone of the reply'),
+      }),
     },
     async ({ account, email_id: emailId, mailbox, intent, tone }) => ({
       messages: [
@@ -72,21 +76,25 @@ Output the draft in this format:
   // ---------------------------------------------------------------------------
   // draft_from_context
   // ---------------------------------------------------------------------------
-  server.prompt(
+  server.registerPrompt(
     'draft_from_context',
-    'Compose a new email about a topic, searching past emails for relevant context to reference naturally.',
     {
-      account: z.string().describe('Account name'),
-      topic: z
-        .string()
-        .describe(
-          'Topic or purpose of the email, e.g., "project status update", "schedule a meeting"',
-        ),
-      to: z.string().describe('Recipient email address(es), comma-separated'),
-      tone: z
-        .enum(['formal', 'friendly', 'brief'])
-        .default('friendly')
-        .describe('Tone of the email'),
+      title: 'Draft from context',
+      description:
+        'Compose a new email about a topic, searching past emails for relevant context to reference naturally.',
+      argsSchema: z.object({
+        account: z.string().describe('Account name'),
+        topic: z
+          .string()
+          .describe(
+            'Topic or purpose of the email, e.g., "project status update", "schedule a meeting"',
+          ),
+        to: z.string().describe('Recipient email address(es), comma-separated'),
+        tone: z
+          .enum(['formal', 'friendly', 'brief'])
+          .default('friendly')
+          .describe('Tone of the email'),
+      }),
     },
     async ({ account, topic, to, tone }) => ({
       messages: [

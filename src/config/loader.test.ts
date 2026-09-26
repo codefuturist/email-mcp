@@ -2,7 +2,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { configExists, generateTemplate, loadConfig, saveConfig } from './loader.js';
+import {
+  configExists,
+  generateTemplate,
+  loadConfig,
+  loadRawConfig,
+  saveConfig,
+  saveConfigValidated,
+} from './loader.js';
 
 const MINIMAL_TOML = `
 [[accounts]]
@@ -168,6 +175,96 @@ read_only = true
   });
 
   // -------------------------------------------------------------------------
+  // verification settings
+  // -------------------------------------------------------------------------
+
+  describe('verification settings', () => {
+    it('normalizes [settings.verification] to camelCase', async () => {
+      const toml = `${MINIMAL_TOML}
+[settings.verification]
+auto_copy = false
+clear_after_seconds = 30
+sender_allowlist = ["*@github.com"]
+`;
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, toml, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.verification.autoCopy).toBe(false);
+      expect(config.settings.verification.clearAfterSeconds).toBe(30);
+      expect(config.settings.verification.senderAllowlist).toEqual(['*@github.com']);
+      expect(config.settings.verification.enabled).toBe(true);
+    });
+
+    it('normalizes [settings.server] and applies its defaults', async () => {
+      const toml = `${MINIMAL_TOML}
+[settings.server]
+port = 3199
+allowed_hosts = ["mail.example.com"]
+`;
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, toml, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.server.port).toBe(3199);
+      expect(config.settings.server.allowedHosts).toEqual(['mail.example.com']);
+      expect(config.settings.server.host).toBe('127.0.0.1');
+      expect(config.settings.server.path).toBe('/mcp');
+      expect(config.settings.server.token).toBe('');
+    });
+
+    it('normalizes confirm_copy and link_action', async () => {
+      const toml = `${MINIMAL_TOML}
+[settings.verification]
+confirm_copy = true
+link_action = "copy"
+`;
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, toml, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.verification.confirmCopy).toBe(true);
+      expect(config.settings.verification.linkAction).toBe('copy');
+    });
+
+    it('applies verification defaults when the section is absent', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.verification.enabled).toBe(true);
+      expect(config.settings.verification.autoCopy).toBe(true);
+      expect(config.settings.verification.confirmCopy).toBe(false);
+      expect(config.settings.verification.copyLinks).toBe(true);
+      expect(config.settings.verification.linkAction).toBe('open');
+      expect(config.settings.verification.maxAgeMinutes).toBe(10);
+      expect(config.settings.verification.accounts).toEqual([]);
+    });
+
+    it('treats MCP_EMAIL_VERIFICATION_ENABLED=false as an opt-out', async () => {
+      process.env.MCP_EMAIL_ADDRESS = 'env@example.com';
+      process.env.MCP_EMAIL_PASSWORD = 'env-pass';
+      process.env.MCP_EMAIL_IMAP_HOST = 'imap.env.com';
+      process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
+      process.env.MCP_EMAIL_VERIFICATION_ENABLED = 'false';
+      process.env.MCP_EMAIL_VERIFICATION_CLEAR_AFTER_SECONDS = '90';
+      process.env.MCP_EMAIL_VERIFICATION_CONFIRM_COPY = 'true';
+      process.env.MCP_EMAIL_VERIFICATION_LINK_ACTION = 'copy';
+
+      const config = await loadConfig(path.join(tmpDir, 'nonexistent.toml'));
+
+      expect(config.settings.verification.enabled).toBe(false);
+      expect(config.settings.verification.clearAfterSeconds).toBe(90);
+      expect(config.settings.verification.confirmCopy).toBe(true);
+      expect(config.settings.verification.linkAction).toBe('copy');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // saveConfig
   // -------------------------------------------------------------------------
 
@@ -199,6 +296,64 @@ read_only = true
       expect(reloaded.accounts[0].name).toBe('saved-test');
       expect(reloaded.accounts[0].email).toBe('saved@example.com');
       expect(reloaded.accounts[0].imap.host).toBe('imap.saved.com');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // saveConfigValidated
+  // -------------------------------------------------------------------------
+
+  describe('saveConfigValidated', () => {
+    it('rejects an invalid config and leaves the existing file untouched', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+      const originalBytes = await fs.readFile(configPath, 'utf-8');
+
+      const invalid = { accounts: [] } as never;
+      await expect(saveConfigValidated(invalid, configPath)).rejects.toThrow();
+
+      expect(await fs.readFile(configPath, 'utf-8')).toBe(originalBytes);
+      expect(await configExists(`${configPath}.bak`)).toBe(false);
+    });
+
+    it('backs up the previous file bytes before writing', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      const original = `# my precious comment\n${MINIMAL_TOML}`;
+      await fs.writeFile(configPath, original, 'utf-8');
+      const raw = await loadRawConfig(configPath);
+      raw.settings.watcher.enabled = true;
+
+      const result = await saveConfigValidated(raw, configPath);
+
+      expect(result.backupPath).toBe(`${configPath}.bak`);
+      expect(await fs.readFile(`${configPath}.bak`, 'utf-8')).toBe(original);
+      const reloaded = await loadRawConfig(configPath);
+      expect(reloaded.settings.watcher.enabled).toBe(true);
+    });
+
+    it('handles the very first save without a backup', async () => {
+      const configPath = path.join(tmpDir, 'fresh.toml');
+      const srcPath = path.join(tmpDir, 'src.toml');
+      await fs.writeFile(srcPath, MINIMAL_TOML, 'utf-8');
+      const raw = await loadRawConfig(srcPath);
+
+      const result = await saveConfigValidated(raw, configPath);
+
+      expect(result.backupPath).toBeUndefined();
+      expect(result.commentsLost).toBe(false);
+      expect(await configExists(configPath)).toBe(true);
+    });
+
+    it('flags comment loss only on the first overwrite of a commented file', async () => {
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, `# documented\n${MINIMAL_TOML}`, 'utf-8');
+      const raw = await loadRawConfig(configPath);
+
+      const first = await saveConfigValidated(raw, configPath);
+      const second = await saveConfigValidated(await loadRawConfig(configPath), configPath);
+
+      expect(first.commentsLost).toBe(true);
+      expect(second.commentsLost).toBe(false);
     });
   });
 
@@ -235,6 +390,7 @@ read_only = true
       expect(template).toContain('[accounts.smtp]');
       expect(template).toContain('[settings]');
       expect(template).toContain('rate_limit');
+      expect(template).toContain('[settings.verification]');
     });
   });
 });

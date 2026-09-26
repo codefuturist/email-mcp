@@ -4,8 +4,8 @@
  * Dynamic resource exposing user-defined email templates.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import type TemplateService from '../services/template.service.js';
 
@@ -13,7 +13,7 @@ export default function registerTemplatesResource(
   server: McpServer,
   templateService: TemplateService,
 ): void {
-  server.resource(
+  server.registerResource(
     'templates',
     new ResourceTemplate('email://templates/{name}', {
       list: async () => {

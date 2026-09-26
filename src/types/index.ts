@@ -137,10 +137,50 @@ export interface HooksConfig {
   calendarConfirm?: boolean;
 }
 
+/** Streamable HTTP server binding — see ServerConfigSchema for precedence. */
+export interface ServerConfig {
+  host: string;
+  port: number;
+  path: string;
+  /** Bearer token; empty = no auth (loopback only). */
+  token: string;
+  allowedHosts: string[];
+}
+
+/** Verification-code / magic-link catching — see VerificationConfigSchema. */
+export interface VerificationConfig {
+  enabled: boolean;
+  autoCopy: boolean;
+  /** Ask with a native dialog before touching the clipboard (macOS). */
+  confirmCopy: boolean;
+  notify: boolean;
+  copyLinks: boolean;
+  /** Caught links: offer to open in the browser, or copy like a code. */
+  linkAction: 'open' | 'copy';
+  clearAfterSeconds: number;
+  maxAgeMinutes: number;
+  accounts: string[];
+  senderAllowlist: string[];
+  senderDenylist: string[];
+}
+
+/** Local mirror settings — see CacheConfigSchema for defaults and rationale. */
+export interface CacheConfig {
+  enabled: boolean;
+  mailboxes: string[];
+  windowDays: number;
+  bodyMessages: number;
+  maxSizeMb: number;
+  syncInterval: number;
+}
+
 export interface AppConfig {
   settings: {
     rateLimit: number;
     readOnly: boolean;
+    server: ServerConfig;
+    verification: VerificationConfig;
+    cache: CacheConfig;
     watcher: WatcherConfig;
     hooks: HooksConfig;
   };
@@ -155,8 +195,10 @@ export interface Mailbox {
   name: string;
   path: string;
   specialUse?: string;
-  totalMessages: number;
-  unseenMessages: number;
+  /** Undefined when the IMAP STATUS call failed — distinct from a genuinely empty mailbox. */
+  totalMessages?: number;
+  /** Undefined when the IMAP STATUS call failed — distinct from "nothing unread". */
+  unseenMessages?: number;
 }
 
 // ---------------------------------------------------------------------------

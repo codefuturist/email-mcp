@@ -5,8 +5,8 @@
  * Only includes folders with unread messages.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import type ConnectionManager from '../connections/manager.js';
 import type ImapService from '../services/imap.service.js';
@@ -19,7 +19,7 @@ export default function registerUnreadResource(
   const names = connections.getAccountNames();
   const accounts = names.map((name) => connections.getAccount(name));
 
-  server.resource(
+  server.registerResource(
     'unread',
     new ResourceTemplate('email://{account}/unread', {
       list: async () => ({
@@ -37,11 +37,18 @@ export default function registerUnreadResource(
       const mailboxes = await imapService.listMailboxes(accountName);
 
       const unreadFolders = mailboxes
-        .filter((mb) => mb.unseenMessages > 0)
+        .filter((mb) => mb.unseenMessages !== undefined && mb.unseenMessages > 0)
         .map((mb) => ({
           path: mb.path,
-          unread: mb.unseenMessages,
+          unread: mb.unseenMessages as number,
         }));
+
+      // Folders whose STATUS call failed have an unknown unread count, so
+      // totalUnread is a lower bound rather than a fact. Say so instead of
+      // letting the consumer read an incomplete total as complete.
+      const incompleteFolders = mailboxes
+        .filter((mb) => mb.unseenMessages === undefined)
+        .map((mb) => mb.path);
 
       const totalUnread = unreadFolders.reduce((sum, f) => sum + f.unread, 0);
 
@@ -49,6 +56,7 @@ export default function registerUnreadResource(
         account: accountName,
         totalUnread,
         folders: unreadFolders,
+        ...(incompleteFolders.length > 0 ? { incompleteFolders } : {}),
       };
 
       return {

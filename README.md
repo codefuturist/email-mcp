@@ -8,7 +8,9 @@
 
 An MCP (Model Context Protocol) server providing comprehensive email capabilities via IMAP and SMTP.
 
-Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 47 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
+Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 52 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, instant verification-code catching with clipboard copy, customizable presets and static rules, and a guided setup wizard.
+
+Built on the MCP TypeScript SDK v2 (spec revision 2026-07-28), it serves over **stdio** for local clients or **Streamable HTTP** for networked access — existing stdio configurations keep working unchanged.
 
 ## Highlights
 
@@ -20,12 +22,14 @@ Enables AI assistants to read, search, send, manage, schedule, and analyze email
 | Labels & bulk ops | ✅ provider-aware | ❌ |
 | Schedule future emails | ✅ | ❌ |
 | Real-time IMAP IDLE watcher | ✅ | ❌ |
+| Verification codes → clipboard | ✅ concealed + auto-clear | ❌ |
 | AI triage with presets | ✅ | ❌ |
 | Desktop & webhook alerts | ✅ | ❌ |
 | Calendar (ICS) extraction | ✅ | ❌ |
 | Email analytics | ✅ | ❌ |
 | OAuth2 (Gmail / M365) | ✅ _experimental_ | ❌ |
 | Guided setup wizard | ✅ auto-detect | ❌ |
+| Streamable HTTP transport | ✅ | ❌ |
 
 ## Table of Contents
 
@@ -74,6 +78,30 @@ npm install -g @codefuturist/email-mcp
 pnpm add -g @codefuturist/email-mcp
 ```
 
+### Native binary (Bun)
+
+A dependency-free single binary (minified + bytecode-precompiled, ~32 ms cold
+start, no Node.js at runtime) can be compiled with [Bun](https://bun.sh):
+
+```bash
+bun run build:binary          # native binary → build/email-mcp
+cp build/email-mcp ~/.local/bin/
+
+bun run build:binaries        # release matrix: darwin-arm64/x64, linux-x64/arm64,
+                              # windows-x64 → build/release/*.{tar.gz,zip} + sha256 checksums
+```
+
+Prebuilt binaries for every release are built by CI with GoReleaser Pro
+(`.goreleaser.yaml`) for all common platforms — Linux glibc + musl, macOS, and
+Windows, each x64 + arm64 where Bun supports it — provenance-attested (verify with
+`gh attestation verify <asset> --repo codefuturist/email-mcp`) and shipped with
+[GitHub releases](https://github.com/codefuturist/email-mcp/releases) —
+installable via mise: `mise use -g ubi:codefuturist/email-mcp`.
+
+`server install` from the binary points the launchd login item at it. Requires the
+bundled imapflow patch (`patches/`) — imapflow passes `servername: false` to
+tls.connect for IP hosts, which Bun's stricter node:tls rejects.
+
 ### Docker
 
 No Node.js required — just Docker.
@@ -100,7 +128,7 @@ docker build -t ghcr.io/codefuturist/email-mcp .
 
 > **Tag convention:** Tags follow bare semver (no `v` prefix), matching Docker ecosystem standards (e.g. `node:24`, `nginx:1.25`). The `latest` tag is only updated on stable releases, never pre-releases.
 
-> **Note:** The server uses stdio transport. Config must be created on the host first
+> **Note:** By default, the server uses stdio transport. Config must be created on the host first
 > (via `npx @codefuturist/email-mcp setup` or manually) and mounted into the container.
 
 ## Usage
@@ -128,6 +156,8 @@ email-mcp test personal   # specific account
 ```
 
 ### Configure Your MCP Client
+
+The snippets below use the default **stdio** transport, best for local desktop clients. For networked or remote access over **Streamable HTTP**, see [Streamable HTTP (networked)](#streamable-http-networked) below.
 
 **Recommended — use the guided installer** (auto-detects Claude Desktop, VS Code, Cursor, Windsurf):
 
@@ -326,6 +356,100 @@ For MCP client configuration (e.g. Claude Desktop):
 ```
 </details>
 
+### Always-on server (detached)
+
+The stdio transport lives only as long as an MCP client keeps it open — which also
+means the IMAP watcher (and verification catching) stop with it. `email-mcp server`
+runs the Streamable HTTP server as a background service instead, iMCP-style:
+
+```bash
+email-mcp server start              # detached on http://127.0.0.1:8080/mcp
+email-mcp server start --port 3199  # any http flags pass through (--host, --token, …)
+email-mcp server start --attach     # foreground instead (Ctrl-C stops)
+email-mcp server status             # pid, address, /healthz, uptime
+email-mcp server logs -n 50         # tail the daemon log
+email-mcp server restart            # reuses the previous flags
+email-mcp server stop               # graceful SIGTERM (add --force for SIGKILL)
+```
+
+The binding lives in the config file, so a plain `server start` is deterministic:
+
+```toml
+[settings.server]
+host = "127.0.0.1"
+port = 8080
+path = "/mcp"
+token = ""            # bearer token; empty = no auth (loopback only)
+allowed_hosts = []    # Host-header allowlist for reverse proxies
+```
+
+Precedence: CLI flags → `EMAIL_MCP_HTTP_*` env → `[settings.server]` → defaults —
+for `email-mcp http`, `server start`, and the launchd login item alike. Edit it
+interactively with `config edit server` (the token renders masked). `--insecure`
+is deliberately flag-only and cannot be persisted.
+
+**Start at login (macOS):** `email-mcp server install` writes a launchd login item
+(`com.email-mcp.server`, RunAtLoad + KeepAlive) running `email-mcp http` with no
+flags — the config file is its single source of truth across reboots and crashes.
+`server status` recognizes the launchd mode; `server uninstall` removes it.
+
+State lives in `$XDG_STATE_HOME/email-mcp/daemon.json`, logs in `server.log` next to
+it (rotated at 5 MB). `stop` only ever signals a process whose command line is
+verifiably this server (PID-reuse safe). Point HTTP-capable MCP clients at
+`http://127.0.0.1:8080/mcp`; binding non-loopback hosts still requires a token.
+
+### Streamable HTTP (networked)
+
+By default the server speaks MCP over **stdio**, ideal for local desktop clients (see the snippets above). For networked or remote access, run it as a **Streamable HTTP** server instead:
+
+```bash
+email-mcp http --port 8080
+```
+
+This serves MCP at `http://127.0.0.1:8080/mcp`, with a health probe at `GET /healthz`.
+
+#### Flags & environment variables
+
+| Flag | Environment variable | Default | Description |
+|------|----------------------|---------|-------------|
+| `--host <addr>` | `EMAIL_MCP_HTTP_HOST` | `127.0.0.1` | Address to bind |
+| `--port <n>` | `EMAIL_MCP_HTTP_PORT` | `8080` | Port to listen on |
+| `--path <path>` | `EMAIL_MCP_HTTP_PATH` | `/mcp` | HTTP path serving MCP |
+| `--token <secret>` | `EMAIL_MCP_HTTP_TOKEN` | — | Require `Authorization: Bearer <secret>` on every request |
+| `--allowed-hosts a,b,c` | `EMAIL_MCP_HTTP_ALLOWED_HOSTS` | _loopback names + bind host_ | Comma-separated `Host` header allowlist (DNS-rebinding protection); `*` disables the check |
+| `--insecure` | — | `false` | Allow binding a non-loopback host without a token |
+
+#### Security
+
+- **Token auth** — When a token is set, every request must send `Authorization: Bearer <token>`.
+- **Non-loopback bind guard** — Binding a non-loopback host (e.g. `0.0.0.0`) **without** a token is refused unless `--insecure` is passed. Use `--insecure` only when TLS and authentication are terminated by an upstream reverse proxy.
+- **DNS-rebinding protection** — The `Host` header is validated against an allowlist (loopback names plus the bind host by default). Set `EMAIL_MCP_HTTP_ALLOWED_HOSTS` to your public domain, or `*` to disable the check when a proxy already enforces it.
+
+#### Client configuration
+
+For clients that support the Streamable HTTP transport:
+
+```json
+{
+  "mcpServers": {
+    "email": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8080/mcp"
+    }
+  }
+}
+```
+
+When a token is configured, add an `Authorization: Bearer <token>` header if your client supports custom headers.
+
+#### Docker
+
+```bash
+docker compose --profile http up
+```
+
+Requires `EMAIL_MCP_HTTP_TOKEN` to be set; the image `EXPOSE`s port `8080`.
+
 ### CLI Commands
 
 ```
@@ -333,6 +457,14 @@ email-mcp [command]
 
 Commands:
   stdio                     Run as MCP server over stdio (default)
+  http                      Run as MCP server over Streamable HTTP (networked)
+  server start [--attach]   Start an always-on HTTP server (detached by default)
+  server stop [--force]     Stop the detached server
+  server status             Show pid, address, health, uptime (exit 1 if stopped)
+  server restart            Stop and start again (reuses previous flags)
+  server logs [-n N]        Show the last N daemon log lines
+  server install            Install as macOS login item (launchd, survives reboots)
+  server uninstall          Remove the login item and stop the server
   account list              List all configured accounts
   account add               Add a new email account interactively
   account edit [name]       Edit an existing account
@@ -343,7 +475,9 @@ Commands:
   install status            Show registration status for detected clients
   install remove            Unregister email-mcp from MCP clients
   config show               Show config (passwords masked)
-  config edit               Edit global settings (rate limit, read-only)
+  config edit [section]     Interactive settings editor (general, server, watcher, verification, cache, hooks, alerts)
+  config validate           Check syntax, schema, typo'd keys, and cross-setting consistency
+  completion zsh|bash|fish  Print shell completion script (accounts and sections complete dynamically)
   config path               Print config file path
   config init               Create template config
   scheduler check           Process pending scheduled emails
@@ -354,9 +488,26 @@ Commands:
   help                      Show help
 ```
 
+### Shell completion
+
+```bash
+# zsh (one line in ~/.zshrc)
+source <(email-mcp completion zsh)
+
+# bash
+source <(email-mcp completion bash)
+
+# fish
+email-mcp completion fish > ~/.config/fish/completions/email-mcp.fish
+```
+
+Completions cover every command, subcommand, and flag — and complete **account
+names from your config** (`email-mcp test <TAB>`, `account edit <TAB>`) and
+**settings sections** (`config edit <TAB>`) dynamically.
+
 ### Configuration
 
-Located at `$XDG_CONFIG_HOME/email-mcp/config.toml` (default: `~/.config/email-mcp/config.toml`).
+Located at `$XDG_CONFIG_HOME/email-mcp/config.toml` (default: `~/.config/email-mcp/config.toml`). Validate it with `email-mcp config validate` (TOML syntax, schema, typo'd keys with did-you-mean, cross-setting consistency; exit 1 on errors — CI-friendly) and edit it interactively with `email-mcp config edit [section]` — every save validates first and backs up the previous file to `config.toml.bak`. Note: programmatic saves rewrite the file without TOML comments (the backup keeps them).
 
 ```toml
 [settings]
@@ -640,9 +791,73 @@ Features:
 - **Graceful degradation** — Falls back to notify mode if client doesn't support sampling
 - **Resource subscriptions** — Pushes `notifications/resources/updated` for unread counts
 
+#### Verification codes (instant OTP catch)
+
+When a mail carrying a verification code (OTP/2FA) or sign-in magic link arrives, email-mcp
+copies it to your clipboard within ~1–2 seconds and shows a notification —
+**“✅ Code 482913 from GitHub — Copied to clipboard, clears in 60s”**. Press ⌘V / Ctrl+V, done.
+
+Detection is scoring-based (English + German), not a bare digit regex: keyword proximity
+(`verification`, `Bestätigungscode`, `expires`, …) minus negative context (order numbers,
+invoices, tracking, Zoom passcodes, phone numbers, prices, dates). A miss beats a wrong
+code on your clipboard.
+
+```toml
+[settings.watcher]
+enabled = true              # REQUIRED for ambient catching (IMAP IDLE push)
+
+[settings.verification]
+enabled = true              # on by default
+auto_copy = true            # copy caught codes/links to the clipboard
+confirm_copy = false        # ask (native dialog) before touching the clipboard
+notify = true               # desktop notification on catch
+copy_links = true           # also catch magic links (only when no code found)
+link_action = "open"        # "open" = offer to open links in the browser, "copy" = clipboard
+clear_after_seconds = 60    # conditional auto-clear (0 = never)
+max_age_minutes = 10        # ignore stale messages (IDLE replays)
+accounts = []               # limit to specific accounts (empty = all)
+sender_allowlist = []       # e.g. ["*@github.com", "*@google.com"]
+sender_denylist = []
+```
+
+**Ask-first mode:** with `confirm_copy = true`, a native macOS dialog ("Code 482913 from
+GitHub — Copy to clipboard?") appears before anything touches your clipboard. **Sign-in
+links** get a three-button dialog by default (`link_action = "open"`): **Open** launches
+the link in your default browser, **Copy** puts it on the clipboard, **Cancel** does
+nothing — opening is *always* confirmed, since auto-launching a browser from mail content
+would be a phishing hazard. Set `link_action = "copy"` for the silent clipboard behavior.
+Dialogs are macOS-only (same mechanism as the calendar confirmation); elsewhere these
+modes degrade to notification-only.
+
+**Clipboard hygiene (macOS):** codes are written via a JXA `osascript` with the
+`org.nspasteboard.ConcealedType` marker — the same convention 1Password/Bitwarden use — so
+well-behaved clipboard managers (Maccy, Paste, …) never record them. The auto-clear is
+conditional: the clipboard is only cleared if it still holds the caught value, so anything
+you copied in the meantime is never stomped. Linux uses `wl-copy`/`xclip`, Windows uses
+PowerShell `Set-Clipboard` (no concealment convention exists there). Zero npm dependencies.
+
+**For agents:** `get_verification_code` fetches the newest code on demand — during an
+automated signup, call it with `wait_seconds = 30` and it returns the code seconds after
+the mail lands (event-driven with the watcher, 5 s polling without). If nothing arrives in
+time, it returns `found: false` with a hint — just call it again.
+
+**Security notes:** the clipboard is shared OS state — any app can read it while the code
+is there (that window is bounded by `clear_after_seconds`). The code itself is never
+written to server logs or the audit log; it does appear in `get_verification_code` results,
+which is the point of that tool. Kill switches: `enabled = false` (feature off) or
+`auto_copy = false` (notification only). Environment overrides: `MCP_EMAIL_VERIFICATION_*`
+(`_ENABLED`, `_AUTO_COPY`, `_CONFIRM_COPY`, `_NOTIFY`, `_COPY_LINKS`, `_LINK_ACTION`,
+`_CLEAR_AFTER_SECONDS`, `_MAX_AGE_MINUTES`, `_ACCOUNTS`, `_SENDER_ALLOWLIST`,
+`_SENDER_DENYLIST`).
+
+Use `check_clipboard_setup` to diagnose the pipeline (add `test_write = true` for a
+harmless copy → read-back → clear round-trip).
+
 ## API
 
-### Tools (47)
+### Tools (52)
+
+> **Structured output:** `list_emails`, `search_emails`, `get_email_status`, and `list_mailboxes` also return machine-readable results (`outputSchema` + `structuredContent`) alongside the human-readable text, for clients that consume typed tool output.
 
 #### Read (14)
 
@@ -709,6 +924,14 @@ Features:
 | `configure_alerts` | Update alert/notification settings at runtime |
 | `check_notification_setup` | Diagnose desktop notification support and provide setup instructions |
 | `test_notification` | Send a test notification to verify OS permissions are configured |
+
+#### Verification (3)
+
+| Tool | Description |
+|------|-------------|
+| `get_verification_code` | Find (or wait up to 45 s for) the newest OTP/2FA code or sign-in magic link, with optional clipboard copy |
+| `check_clipboard_setup` | Diagnose clipboard integration (platform tools, concealed-write support) with optional round-trip test |
+| `configure_verification` | Update verification-catching settings at runtime (incl. starting/stopping the catcher), optional persist to config file |
 
 #### Calendar & Reminders (6)
 
@@ -789,9 +1012,12 @@ src/
 │   ├── watcher.service.ts — IMAP IDLE real-time watcher with auto-reconnect
 │   ├── hooks.service.ts   — AI triage via MCP sampling + static rules + auto-labeling/flagging
 │   ├── notifier.service.ts — Multi-channel notification dispatcher (desktop/sound/webhook)
+│   ├── clipboard.service.ts — Concealed clipboard writes for caught codes (zero deps)
+│   ├── dialog.service.ts   — Native confirm dialogs + browser hand-off (macOS)
+│   ├── verification-catcher.service.ts — Instant OTP/magic-link catch on new mail
 │   ├── presets.ts         — Built-in hook presets (inbox-zero, gtd, priority-focus, etc.)
 │   └── event-bus.ts       — Typed EventEmitter for internal email events
-├── tools/                 — MCP tool definitions (42)
+├── tools/                 — MCP tool definitions (52)
 ├── prompts/               — MCP prompt definitions (7)
 ├── resources/             — MCP resource definitions (6)
 ├── safety/                — Audit trail and rate limiter
@@ -814,6 +1040,23 @@ pnpm check       # lint and format
 pnpm build       # build
 pnpm start       # run
 ```
+
+### Testing
+
+```bash
+pnpm test              # unit tests
+pnpm test:integration  # against a throwaway GreenMail server (Docker required)
+pnpm smoke             # every MCP tool against a real configured account
+```
+
+`pnpm smoke` drives all tools over stdio the way a client does, which reaches
+what GreenMail cannot: provider quirks, real-world MIME, and the macOS
+Calendar bridges. It needs a working account, so it is not part of CI. Writes
+stay inside a scratch folder and a draft it creates itself; it does not touch
+Calendar, Reminders, notifications, or `reply_email`, which would send mail to
+a real correspondent. Pass `E2E_ACCOUNT=<name>` to choose an account, otherwise
+it uses the first one configured.
+
 
 ## License
 

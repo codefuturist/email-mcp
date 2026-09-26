@@ -1,0 +1,26 @@
+diff --git a/dist/cjs/imap-flow.js b/dist/cjs/imap-flow.js
+index 395e9c78f176f155fe462e9b8f9e1d5c3216d875..80d41013f201f229f14e5659bd489b3aaad39183 100644
+--- a/dist/cjs/imap-flow.js
++++ b/dist/cjs/imap-flow.js
+@@ -223,7 +223,7 @@ class ImapFlow extends node_events_1.EventEmitter {
+         // which is POP3 - a client created without an explicit port could never connect.
+         this.port = Number(this.options.port) || (this.secureConnection ? 993 : 143);
+         this.host = this.options.host || 'localhost';
+-        this.servername = this.options.servername ? this.options.servername : !node_net_1.default.isIP(this.host) ? this.host : false;
++        this.servername = this.options.servername ? this.options.servername : !node_net_1.default.isIP(this.host) ? this.host : undefined;
+         if (typeof this.options.secure === 'undefined' && this.port === 993) {
+             // if secure option is not set but port is 993, then default to secure
+             this.secureConnection = true;
+diff --git a/dist/esm/imap-flow.js b/dist/esm/imap-flow.js
+index 2dc5e2d7a3736187bccb100dd878273e19f7fa30..6460ae2da7a62b4dcb3910a2298fdfd0ac65261d 100644
+--- a/dist/esm/imap-flow.js
++++ b/dist/esm/imap-flow.js
+@@ -183,7 +183,7 @@ export class ImapFlow extends EventEmitter {
+         // which is POP3 - a client created without an explicit port could never connect.
+         this.port = Number(this.options.port) || (this.secureConnection ? 993 : 143);
+         this.host = this.options.host || 'localhost';
+-        this.servername = this.options.servername ? this.options.servername : !net.isIP(this.host) ? this.host : false;
++        this.servername = this.options.servername ? this.options.servername : !net.isIP(this.host) ? this.host : undefined;
+         if (typeof this.options.secure === 'undefined' && this.port === 993) {
+             // if secure option is not set but port is 993, then default to secure
+             this.secureConnection = true;

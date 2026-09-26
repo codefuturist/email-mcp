@@ -1,35 +1,97 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema-pro.json
 # ──────────────────────────────────────────────────────────────────────────────
-# email-mcp — GoReleaser configuration (modular fragment system)
+# email-mcp — GoReleaser Pro configuration
 #
-# Shared (from config/goreleaser/):
+# Shared (vendored under config/goreleaser/ for standalone-repo CI):
 #   base.yaml                  – metadata, release.github, snapshot, checksums
 #
 # Project-specific (inline):
-#   builds                     – Skipped (Node.js/TS; Dockerfile handles build)
+#   builds                     – Bun native binaries, all common OS/arch targets
+#   archives                   – tar.gz (zip on Windows), target-derived names
 #   dockers_v2                 – Dual-variant (Debian + Alpine) multi-arch images
 #   changelog                  – GitHub-generated release notes with filters
 #
+# Run from the repo root (CI: Release workflow's goreleaser job).
 # Legacy config preserved at: .goreleaser.yaml.legacy
 # ──────────────────────────────────────────────────────────────────────────────
 version: 2
 project_name: email-mcp
-
-# ── Monorepo (GoReleaser Pro) ────────────────────────────────────────────────
-monorepo:
-  tag_prefix: email-mcp/
-  dir: services/mcp/email-mcp
 
 # ── Shared base ──────────────────────────────────────────────────────────────
 includes:
   - from_file:
       path: config/goreleaser/base.yaml
 
-# ── Build ────────────────────────────────────────────────────────────────────
-# No Go builds — this is a Node.js/TypeScript project.
-# The Dockerfile handles the full build pipeline (pnpm install → tsc → prune).
+# goreleaser's default ./dist collides with the tsc output directory —
+# `--clean` would wipe the compiled server. Keep release artifacts in build/.
+dist: build/goreleaser
+
+# ── Build (GoReleaser Pro Bun builder) ───────────────────────────────────────
+# Standalone native executables: minified + bytecode-precompiled (~32 ms cold
+# start, no Node.js at runtime). Every common OS/arch: glibc + musl Linux,
+# macOS, and Windows, each for x64 + arm64. Requires `bun` on PATH, installed
+# node_modules, and the pnpm-patched imapflow (patches/) — Bun's node:tls
+# rejects imapflow's `servername: false`.
+# Musl targets live in a separate build id: goreleaser identifies archive
+# platforms by os/arch only (the Bun builder's .Abi is not part of the key),
+# so glibc and musl in one build id trip the multiple-binaries-per-platform
+# guard. One build + one archive per libc keeps every platform unambiguous.
 builds:
-  - skip: true
+  - id: email-mcp
+    builder: bun
+    main: ./src/main.ts
+    binary: email-mcp
+    targets:
+      - bun-linux-x64-modern
+      - bun-linux-arm64
+      - bun-darwin-x64
+      - bun-darwin-arm64
+      - bun-windows-x64-modern
+      # bun-windows-arm64: Bun 1.4.2 compiles it, but goreleaser-pro 2.18.2's
+      # Bun builder doesn't accept the target yet — re-add when it does.
+      # (Windows-on-ARM runs the x64 build via emulation meanwhile.)
+    # flags: ["--minify", "--bytecode"]  # goreleaser-pro 2.18.2 bug: any
+    # non-empty flags list injects an empty arg (bun: Invalid Argument '').
+    # The wrapper below appends the flags instead — see scripts/bun-goreleaser.sh.
+    tool: ./scripts/bun-goreleaser.sh
+
+  - id: email-mcp-musl
+    builder: bun
+    main: ./src/main.ts
+    binary: email-mcp
+    targets:
+      - bun-linux-x64-musl
+      - bun-linux-arm64-musl
+    tool: ./scripts/bun-goreleaser.sh
+
+# ── Archives ─────────────────────────────────────────────────────────────────
+# GoReleaser-conventional names; the Bun builder maps targets to GOARCH terms
+# (x64 → amd64): email-mcp_1.2.3_linux_amd64.tar.gz, …_linux_amd64_musl.tar.gz,
+# …_windows_amd64.zip, … Consumable via mise/ubi.
+archives:
+  - id: default
+    ids: [email-mcp]
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README*
+      - LICENSE*
+      - CHANGELOG*
+
+  - id: musl
+    ids: [email-mcp-musl]
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_musl"
+    files:
+      - README*
+      - LICENSE*
+      - CHANGELOG*
 
 # ── Docker images (project-specific) ────────────────────────────────────────
 # Two variants pushed to dual registries (GHCR + Docker Hub) with custom tag
@@ -41,8 +103,10 @@ dockers_v2:
     dockerfile: Dockerfile
     extra_files:
       - src/
+      - patches/
       - package.json
       - pnpm-lock.yaml
+      - pnpm-workspace.yaml
       - tsconfig.build.json
       - tsconfig.json
       - biome.json
@@ -66,7 +130,7 @@ dockers_v2:
       - linux/arm64
     labels:
       org.opencontainers.image.title: email-mcp
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.url: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.version: "{{ .Version }}"
@@ -75,7 +139,7 @@ dockers_v2:
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.vendor: codefuturist
     annotations:
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.created: "{{ .Date }}"
@@ -85,8 +149,10 @@ dockers_v2:
     dockerfile: Dockerfile.alpine
     extra_files:
       - src/
+      - patches/
       - package.json
       - pnpm-lock.yaml
+      - pnpm-workspace.yaml
       - tsconfig.build.json
       - tsconfig.json
       - biome.json
@@ -103,7 +169,7 @@ dockers_v2:
       - linux/arm64
     labels:
       org.opencontainers.image.title: email-mcp
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.url: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.version: "{{ .Version }}"
@@ -112,7 +178,7 @@ dockers_v2:
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.vendor: codefuturist
     annotations:
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.created: "{{ .Date }}"

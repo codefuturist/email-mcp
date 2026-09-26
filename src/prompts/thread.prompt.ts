@@ -5,17 +5,21 @@
  * with structured output including participants, decisions, and action items.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 export default function registerThreadPrompt(server: McpServer): void {
-  server.prompt(
+  server.registerPrompt(
     'summarize_thread',
-    'Summarize an email conversation thread. Produces a structured report with participants, timeline, decisions, and action items.',
     {
-      account: z.string().describe('Account name'),
-      message_id: z.string().describe('Message-ID of any email in the thread (from get_email)'),
-      mailbox: z.string().default('INBOX').describe('Mailbox to search (default: INBOX)'),
+      title: 'Summarize thread',
+      description:
+        'Summarize an email conversation thread. Produces a structured report with participants, timeline, decisions, and action items.',
+      argsSchema: z.object({
+        account: z.string().describe('Account name'),
+        message_id: z.string().describe('Message-ID of any email in the thread (from get_email)'),
+        mailbox: z.string().default('INBOX').describe('Mailbox to search (default: INBOX)'),
+      }),
     },
     async ({ account, message_id: messageId, mailbox }) => ({
       messages: [

@@ -8,6 +8,8 @@
  * explicitly in non-interactive environments.
  */
 
+import { cancel, isCancel } from '@clack/prompts';
+
 export default function ensureInteractive(): void {
   if (!process.stdin.isTTY) {
     console.error(
@@ -16,5 +18,21 @@ export default function ensureInteractive(): void {
     );
     process.exitCode = 1;
     throw new Error('Non-interactive terminal detected');
+  }
+}
+
+/** Thrown when the user cancels a prompt; command dispatchers swallow it. */
+export class CancelledError extends Error {
+  constructor() {
+    super('Operation cancelled.');
+  }
+}
+
+// clack ≥1.8 types its cancel sentinel as a unique symbol, so narrowing via
+// `T | symbol` no longer sticks; excluding all symbols from T works for both.
+export function assertNotCancel<T>(value: T): asserts value is Exclude<T, symbol> {
+  if (isCancel(value)) {
+    cancel('Operation cancelled.');
+    throw new CancelledError();
   }
 }

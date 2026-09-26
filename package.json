@@ -1,11 +1,11 @@
 {
   "name": "@codefuturist/email-mcp",
-  "version": "0.2.3",
+  "version": "0.5.1",
   "mcpName": "io.github.codefuturist/email-mcp",
   "description": "Email MCP server with IMAP + SMTP support",
   "type": "module",
   "bin": {
-    "email-mcp": "./dist/main.js"
+    "email-mcp": "dist/main.js"
   },
   "main": "./dist/main.js",
   "types": "./dist/main.d.ts",
@@ -17,17 +17,18 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
+    "lint": "biome lint src/",
+    "lint:fix": "biome lint --write src/",
     "format": "biome format --write src/",
-    "format:check": "biome check src/",
+    "format:check": "biome format src/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.config.integration.ts",
+    "smoke": "tsx scripts/e2e-smoke.mts",
     "test:all": "vitest run && vitest run --config vitest.config.integration.ts",
-    "check": "biome check src/ && eslint src/",
-    "report": "mkdir -p reports && biome check src/ --reporter=json > reports/biome.json 2>&1; eslint src/ -f json -o reports/eslint.json; actionlint -format '{{json .}}' > reports/actionlint.json 2>&1; pnpm test",
+    "check": "biome check src/",
+    "report": "mkdir -p reports && biome check src/ --reporter=json > reports/biome.json 2>&1; actionlint -format '{{json .}}' > reports/actionlint.json 2>&1; pnpm test",
     "commit": "cog commit",
     "changelog": "cog changelog",
     "version:check": "cog check",
@@ -46,7 +47,9 @@
     "release:check": "goreleaser check",
     "release:snapshot": "goreleaser release --snapshot --clean && pnpm docker:clean",
     "release:dry-run": "goreleaser release --skip=publish --clean && pnpm docker:clean",
-    "prepublishOnly": "tsc -p tsconfig.build.json"
+    "prepublishOnly": "tsc -p tsconfig.build.json",
+    "build:binary": "bun build --compile --minify --bytecode src/main.ts --outfile build/email-mcp",
+    "build:binaries": "bash scripts/build-binaries.sh"
   },
   "keywords": [
     "email",
@@ -75,31 +78,29 @@
     "url": "https://github.com/codefuturist/email-mcp/issues"
   },
   "dependencies": {
-    "@clack/prompts": "^1.0.1",
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "imapflow": "^1.2.9",
-    "node-ical": "^0.25.2",
-    "nodemailer": "^8.0.1",
-    "smol-toml": "^1.6.0",
-    "zod": "^4.3.6"
+    "@clack/prompts": "^1.8.1",
+    "@modelcontextprotocol/node": "^2.1.0",
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "@modelcontextprotocol/server": "^2.1.0",
+    "imapflow": "^2.0.7",
+    "node-ical": "^0.27.2",
+    "nodemailer": "^10.0.10",
+    "smol-toml": "^1.9.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.2",
-    "@eslint/compat": "^2.0.2",
-    "@eslint/js": "^9.39.2",
-    "@types/node": "^25.2.3",
-    "@types/nodemailer": "^7.0.10",
-    "@vitest/coverage-v8": "^4.0.18",
-    "eslint": "^9.39.2",
-    "eslint-config-airbnb-extended": "^3.0.1",
-    "lefthook": "^2.1.1",
-    "testcontainers": "^11.12.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "@biomejs/biome": "^2.5.14",
+    "@types/node": "^26.6.2",
+    "@types/nodemailer": "^8.0.2",
+    "@vitest/coverage-v8": "^5.0.2",
+    "lefthook": "^2.1.14",
+    "testcontainers": "^12.1.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
   },
   "engines": {
     "node": ">=24.0.0"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@11.22.0"
 }

@@ -127,6 +127,63 @@ describe('SettingsSchema', () => {
   });
 });
 
+describe('verification settings', () => {
+  const expectedDefaults = {
+    enabled: true,
+    auto_copy: true,
+    confirm_copy: false,
+    notify: true,
+    copy_links: true,
+    link_action: 'open',
+    clear_after_seconds: 60,
+    max_age_minutes: 10,
+    accounts: [],
+    sender_allowlist: [],
+    sender_denylist: [],
+  };
+
+  it('applies verification defaults via SettingsSchema', () => {
+    const result = SettingsSchema.parse({});
+    expect(result.verification).toEqual(expectedDefaults);
+  });
+
+  // Guards the duplicated default literal in AppConfigFileSchema — the two
+  // blocks must stay in lockstep.
+  it('applies verification defaults when settings is absent entirely', () => {
+    const result = AppConfigFileSchema.parse({ accounts: [validAccount()] });
+    expect(result.settings.verification).toEqual(expectedDefaults);
+  });
+
+  it('rejects clear_after_seconds beyond one hour', () => {
+    expect(() => SettingsSchema.parse({ verification: { clear_after_seconds: 3601 } })).toThrow();
+  });
+
+  it('rejects an unknown link_action', () => {
+    expect(() => SettingsSchema.parse({ verification: { link_action: 'paste' } })).toThrow();
+  });
+});
+
+describe('server settings', () => {
+  it('applies server defaults via SettingsSchema and AppConfigFileSchema', () => {
+    const expected = {
+      host: '127.0.0.1',
+      port: 8080,
+      path: '/mcp',
+      token: '',
+      allowed_hosts: [],
+    };
+    expect(SettingsSchema.parse({}).server).toEqual(expected);
+    expect(AppConfigFileSchema.parse({ accounts: [validAccount()] }).settings.server).toEqual(
+      expected,
+    );
+  });
+
+  it('rejects out-of-range ports', () => {
+    expect(() => SettingsSchema.parse({ server: { port: 0 } })).toThrow();
+    expect(() => SettingsSchema.parse({ server: { port: 65536 } })).toThrow();
+  });
+});
+
 describe('AppConfigFileSchema', () => {
   it('accepts valid config with one account', () => {
     const result = AppConfigFileSchema.parse({ accounts: [validAccount()] });

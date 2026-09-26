@@ -21,30 +21,16 @@ import {
   text,
 } from '@clack/prompts';
 
-import { CONFIG_FILE, configExists, loadRawConfig, saveConfig } from '../config/loader.js';
+import { CONFIG_FILE, configExists, loadRawConfig, saveConfigValidated } from '../config/loader.js';
 import type { RawAccountConfig, RawAppConfig } from '../config/schema.js';
-import { AppConfigFileSchema } from '../config/schema.js';
 import ConnectionManager from '../connections/manager.js';
 import type { AccountConfig } from '../types/index.js';
-import ensureInteractive from './guard.js';
+import ensureInteractive, { assertNotCancel, CancelledError } from './guard.js';
 import { detectProvider } from './providers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-class CancelledError extends Error {
-  constructor() {
-    super('Operation cancelled.');
-  }
-}
-
-function assertNotCancel<T>(value: T | symbol): asserts value is T {
-  if (isCancel(value)) {
-    cancel('Operation cancelled.');
-    throw new CancelledError();
-  }
-}
 
 function formatSecurity(tls: boolean, starttls: boolean): string {
   if (tls) return 'TLS';
@@ -499,6 +485,34 @@ async function addAccount(): Promise<void> {
         settings: {
           rate_limit: 10,
           read_only: false,
+          server: {
+            host: '127.0.0.1',
+            port: 8080,
+            path: '/mcp',
+            token: '',
+            allowed_hosts: [],
+          },
+          verification: {
+            enabled: true,
+            auto_copy: true,
+            confirm_copy: false,
+            notify: true,
+            copy_links: true,
+            link_action: 'open' as const,
+            clear_after_seconds: 60,
+            max_age_minutes: 10,
+            accounts: [],
+            sender_allowlist: [],
+            sender_denylist: [],
+          },
+          cache: {
+            enabled: true,
+            mailboxes: ['INBOX'],
+            window_days: 90,
+            body_messages: 500,
+            max_size_mb: 500,
+            sync_interval: 300,
+          },
           watcher: {
             enabled: false,
             folders: ['INBOX'],
@@ -527,8 +541,7 @@ async function addAccount(): Promise<void> {
         accounts: [newAccount],
       };
 
-  AppConfigFileSchema.parse(config);
-  await saveConfig(config);
+  await saveConfigValidated(config);
   log.success(`Account "${identity.name}" added. Config saved to ${CONFIG_FILE}`);
 
   note(
@@ -696,8 +709,7 @@ async function editAccount(nameArg?: string): Promise<void> {
     accounts: updatedAccounts,
   };
 
-  AppConfigFileSchema.parse(updatedConfig);
-  await saveConfig(updatedConfig);
+  await saveConfigValidated(updatedConfig);
   log.success(`Account "${identity.name}" updated. Config saved to ${CONFIG_FILE}`);
   outro('Done!');
 }
@@ -775,8 +787,7 @@ async function deleteAccount(nameArg?: string): Promise<void> {
     accounts: updatedAccounts,
   };
 
-  AppConfigFileSchema.parse(updatedConfig);
-  await saveConfig(updatedConfig);
+  await saveConfigValidated(updatedConfig);
   log.success(`Account "${target.name}" deleted. Config saved to ${CONFIG_FILE}`);
   outro('Done!');
 }

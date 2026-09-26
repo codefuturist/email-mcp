@@ -7,13 +7,15 @@
  * - Graceful shutdown closes all connections
  */
 
-import { ImapFlow } from 'imapflow';
-import type { Transporter } from 'nodemailer';
+import type { ImapFlow } from 'imapflow';
+import type { TransportConfig, Transporter } from 'nodemailer';
 import nodemailer from 'nodemailer';
 import { mcpLog } from '../logging.js';
 
+import eventBus from '../services/event-bus.js';
 import type OAuthService from '../services/oauth.service.js';
 import type { AccountConfig } from '../types/index.js';
+import { createImapClient } from '../utils/imap-client.js';
 import type { IConnectionManager } from './types.js';
 
 type SmtpAuth =
@@ -72,6 +74,11 @@ export default class ConnectionManager implements IConnectionManager {
       } catch {
         /* ignore */
       }
+      // Announce the replacement. A new connection may be talking to a
+      // different server, or to a mailbox that has been recreated since —
+      // so capability probes, per-account memos and any cached UIDVALIDITY
+      // derived from the old connection must be revalidated.
+      eventBus.emit('imap:reconnect', { account: accountName });
     }
 
     const account = this.getAccount(accountName);
@@ -85,7 +92,7 @@ export default class ConnectionManager implements IConnectionManager {
       auth = { user: account.username, pass: account.password };
     }
 
-    const client = new ImapFlow({
+    const client = createImapClient({
       host: account.imap.host,
       port: account.imap.port,
       secure: account.imap.tls,
@@ -113,7 +120,7 @@ export default class ConnectionManager implements IConnectionManager {
   private static buildSmtpTransportOptions(
     account: AccountConfig,
     auth: SmtpAuth,
-  ): nodemailer.TransportOptions {
+  ): TransportConfig {
     const pool = account.smtp.pool ?? {
       enabled: true,
       maxConnections: 1,
@@ -137,7 +144,7 @@ export default class ConnectionManager implements IConnectionManager {
             maxMessages: pool.maxMessages,
           }
         : {}),
-    } as nodemailer.TransportOptions;
+    } as TransportConfig;
   }
 
   async getSmtpTransport(
@@ -214,7 +221,7 @@ export default class ConnectionManager implements IConnectionManager {
         auth = { user: account.username, pass: account.password };
       }
 
-      client = new ImapFlow({
+      client = createImapClient({
         host: account.imap.host,
         port: account.imap.port,
         secure: account.imap.tls,
