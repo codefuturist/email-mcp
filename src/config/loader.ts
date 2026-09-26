@@ -51,8 +51,10 @@ function loadFromEnv(): RawAppConfig | null {
         // and the on-demand tool is read-only unless asked to copy.
         enabled: process.env.MCP_EMAIL_VERIFICATION_ENABLED !== 'false',
         auto_copy: process.env.MCP_EMAIL_VERIFICATION_AUTO_COPY !== 'false',
+        confirm_copy: process.env.MCP_EMAIL_VERIFICATION_CONFIRM_COPY === 'true',
         notify: process.env.MCP_EMAIL_VERIFICATION_NOTIFY !== 'false',
         copy_links: process.env.MCP_EMAIL_VERIFICATION_COPY_LINKS !== 'false',
+        link_action: (process.env.MCP_EMAIL_VERIFICATION_LINK_ACTION as 'open' | 'copy') ?? 'open',
         clear_after_seconds: parseInt(
           process.env.MCP_EMAIL_VERIFICATION_CLEAR_AFTER_SECONDS ?? '60',
           10,
@@ -251,8 +253,10 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
       verification: {
         enabled: raw.settings.verification.enabled,
         autoCopy: raw.settings.verification.auto_copy,
+        confirmCopy: raw.settings.verification.confirm_copy,
         notify: raw.settings.verification.notify,
         copyLinks: raw.settings.verification.copy_links,
+        linkAction: raw.settings.verification.link_action,
         clearAfterSeconds: raw.settings.verification.clear_after_seconds,
         maxAgeMinutes: raw.settings.verification.max_age_minutes,
         accounts: raw.settings.verification.accounts,
@@ -390,8 +394,10 @@ read_only = false  # set to true to disable all write operations
 # [settings.verification]
 # enabled = true
 # auto_copy = true           # copy caught codes/links to the clipboard
+# confirm_copy = false       # ask (native dialog) before touching the clipboard
 # notify = true              # desktop notification when something is caught
 # copy_links = true          # also catch magic links (when no code found)
+# link_action = "open"       # "open" = offer to open links in the browser, "copy" = clipboard
 # clear_after_seconds = 60   # auto-clear clipboard if unchanged (0 = never)
 # max_age_minutes = 10       # ignore messages older than this
 # accounts = []              # watch these accounts only (empty = all)

@@ -20,6 +20,7 @@ import RateLimiter from './safety/rate-limiter.js';
 import createServer from './server.js';
 import CalendarService from './services/calendar.service.js';
 import ClipboardService from './services/clipboard.service.js';
+import DialogService from './services/dialog.service.js';
 import HooksService from './services/hooks.service.js';
 import ImapService from './services/imap.service.js';
 import LocalCalendarService from './services/local-calendar.service.js';
@@ -47,6 +48,7 @@ export interface AppServices {
   watcherService: WatcherService;
   hooksService: HooksService;
   clipboardService: ClipboardService;
+  dialogService: DialogService;
   verificationCatcher: VerificationCatcherService;
   /** Absent when the local mirror is disabled in config. */
   cacheStore?: CacheStore;
@@ -70,6 +72,7 @@ export async function buildServices(): Promise<AppServices> {
   const watcherService = new WatcherService(config.settings.watcher, config.accounts);
   const hooksService = new HooksService(config.settings.hooks, imapService);
   const clipboardService = new ClipboardService();
+  const dialogService = new DialogService();
   // Shares the hooks notifier so desktop notifications from both features
   // sit behind one rate limit (and one lifecycle — hooks owns stop()).
   const verificationCatcher = new VerificationCatcherService(
@@ -77,6 +80,7 @@ export async function buildServices(): Promise<AppServices> {
     imapService,
     hooksService.getNotifier(),
     clipboardService,
+    dialogService,
   );
 
   // The mirror is optional and must never block startup: if SQLite cannot be
@@ -114,6 +118,7 @@ export async function buildServices(): Promise<AppServices> {
     watcherService,
     hooksService,
     clipboardService,
+    dialogService,
     verificationCatcher,
     cacheStore,
     syncEngine,

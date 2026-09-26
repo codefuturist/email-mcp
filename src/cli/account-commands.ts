@@ -502,8 +502,10 @@ async function addAccount(): Promise<void> {
           verification: {
             enabled: true,
             auto_copy: true,
+            confirm_copy: false,
             notify: true,
             copy_links: true,
+            link_action: 'open' as const,
             clear_after_seconds: 60,
             max_age_minutes: 10,
             accounts: [],

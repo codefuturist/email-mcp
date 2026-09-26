@@ -220,11 +220,24 @@ export default function registerVerificationTools(
           '[settings.verification]',
           `  enabled = ${verification.enabled}`,
           `  auto_copy = ${verification.autoCopy}`,
+          `  confirm_copy = ${verification.confirmCopy}`,
           `  notify = ${verification.notify}`,
           `  copy_links = ${verification.copyLinks}`,
+          `  link_action = "${verification.linkAction}"`,
           `  clear_after_seconds = ${verification.clearAfterSeconds}`,
           `  max_age_minutes = ${verification.maxAgeMinutes}`,
         );
+        if (
+          process.platform !== 'darwin' &&
+          (verification.confirmCopy || verification.linkAction === 'open')
+        ) {
+          lines.push(
+            '',
+            '⚠️ confirm_copy / link_action="open" need native dialogs, which are',
+            'macOS-only for now — on this platform those hits degrade to',
+            'notification-only.',
+          );
+        }
 
         if (verification.enabled && !watcherActive) {
           lines.push(

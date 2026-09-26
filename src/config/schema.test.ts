@@ -131,8 +131,10 @@ describe('verification settings', () => {
   const expectedDefaults = {
     enabled: true,
     auto_copy: true,
+    confirm_copy: false,
     notify: true,
     copy_links: true,
+    link_action: 'open',
     clear_after_seconds: 60,
     max_age_minutes: 10,
     accounts: [],
@@ -154,6 +156,10 @@ describe('verification settings', () => {
 
   it('rejects clear_after_seconds beyond one hour', () => {
     expect(() => SettingsSchema.parse({ verification: { clear_after_seconds: 3601 } })).toThrow();
+  });
+
+  it('rejects an unknown link_action', () => {
+    expect(() => SettingsSchema.parse({ verification: { link_action: 'paste' } })).toThrow();
   });
 });
 

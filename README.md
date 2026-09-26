@@ -717,14 +717,25 @@ enabled = true              # REQUIRED for ambient catching (IMAP IDLE push)
 [settings.verification]
 enabled = true              # on by default
 auto_copy = true            # copy caught codes/links to the clipboard
+confirm_copy = false        # ask (native dialog) before touching the clipboard
 notify = true               # desktop notification on catch
 copy_links = true           # also catch magic links (only when no code found)
+link_action = "open"        # "open" = offer to open links in the browser, "copy" = clipboard
 clear_after_seconds = 60    # conditional auto-clear (0 = never)
 max_age_minutes = 10        # ignore stale messages (IDLE replays)
 accounts = []               # limit to specific accounts (empty = all)
 sender_allowlist = []       # e.g. ["*@github.com", "*@google.com"]
 sender_denylist = []
 ```
+
+**Ask-first mode:** with `confirm_copy = true`, a native macOS dialog ("Code 482913 from
+GitHub — Copy to clipboard?") appears before anything touches your clipboard. **Sign-in
+links** get a three-button dialog by default (`link_action = "open"`): **Open** launches
+the link in your default browser, **Copy** puts it on the clipboard, **Cancel** does
+nothing — opening is *always* confirmed, since auto-launching a browser from mail content
+would be a phishing hazard. Set `link_action = "copy"` for the silent clipboard behavior.
+Dialogs are macOS-only (same mechanism as the calendar confirmation); elsewhere these
+modes degrade to notification-only.
 
 **Clipboard hygiene (macOS):** codes are written via a JXA `osascript` with the
 `org.nspasteboard.ConcealedType` marker — the same convention 1Password/Bitwarden use — so
@@ -743,8 +754,9 @@ is there (that window is bounded by `clear_after_seconds`). The code itself is n
 written to server logs or the audit log; it does appear in `get_verification_code` results,
 which is the point of that tool. Kill switches: `enabled = false` (feature off) or
 `auto_copy = false` (notification only). Environment overrides: `MCP_EMAIL_VERIFICATION_*`
-(`_ENABLED`, `_AUTO_COPY`, `_NOTIFY`, `_COPY_LINKS`, `_CLEAR_AFTER_SECONDS`,
-`_MAX_AGE_MINUTES`, `_ACCOUNTS`, `_SENDER_ALLOWLIST`, `_SENDER_DENYLIST`).
+(`_ENABLED`, `_AUTO_COPY`, `_CONFIRM_COPY`, `_NOTIFY`, `_COPY_LINKS`, `_LINK_ACTION`,
+`_CLEAR_AFTER_SECONDS`, `_MAX_AGE_MINUTES`, `_ACCOUNTS`, `_SENDER_ALLOWLIST`,
+`_SENDER_DENYLIST`).
 
 Use `check_clipboard_setup` to diagnose the pipeline (add `test_write = true` for a
 harmless copy → read-back → clear round-trip).
@@ -908,6 +920,7 @@ src/
 │   ├── hooks.service.ts   — AI triage via MCP sampling + static rules + auto-labeling/flagging
 │   ├── notifier.service.ts — Multi-channel notification dispatcher (desktop/sound/webhook)
 │   ├── clipboard.service.ts — Concealed clipboard writes for caught codes (zero deps)
+│   ├── dialog.service.ts   — Native confirm dialogs + browser hand-off (macOS)
 │   ├── verification-catcher.service.ts — Instant OTP/magic-link catch on new mail
 │   ├── presets.ts         — Built-in hook presets (inbox-zero, gtd, priority-focus, etc.)
 │   └── event-bus.ts       — Typed EventEmitter for internal email events

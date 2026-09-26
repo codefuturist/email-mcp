@@ -46,8 +46,10 @@ function createConfig(readOnly: boolean): AppConfig {
       verification: {
         enabled: true,
         autoCopy: true,
+        confirmCopy: false,
         notify: true,
         copyLinks: true,
+        linkAction: 'open' as const,
         clearAfterSeconds: 60,
         maxAgeMinutes: 10,
         accounts: [],

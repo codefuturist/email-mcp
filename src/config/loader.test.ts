@@ -190,6 +190,21 @@ sender_allowlist = ["*@github.com"]
       expect(config.settings.verification.enabled).toBe(true);
     });
 
+    it('normalizes confirm_copy and link_action', async () => {
+      const toml = `${MINIMAL_TOML}
+[settings.verification]
+confirm_copy = true
+link_action = "copy"
+`;
+      const configPath = path.join(tmpDir, 'config.toml');
+      await fs.writeFile(configPath, toml, 'utf-8');
+
+      const config = await loadConfig(configPath);
+
+      expect(config.settings.verification.confirmCopy).toBe(true);
+      expect(config.settings.verification.linkAction).toBe('copy');
+    });
+
     it('applies verification defaults when the section is absent', async () => {
       const configPath = path.join(tmpDir, 'config.toml');
       await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
@@ -198,7 +213,9 @@ sender_allowlist = ["*@github.com"]
 
       expect(config.settings.verification.enabled).toBe(true);
       expect(config.settings.verification.autoCopy).toBe(true);
+      expect(config.settings.verification.confirmCopy).toBe(false);
       expect(config.settings.verification.copyLinks).toBe(true);
+      expect(config.settings.verification.linkAction).toBe('open');
       expect(config.settings.verification.maxAgeMinutes).toBe(10);
       expect(config.settings.verification.accounts).toEqual([]);
     });
@@ -210,11 +227,15 @@ sender_allowlist = ["*@github.com"]
       process.env.MCP_EMAIL_SMTP_HOST = 'smtp.env.com';
       process.env.MCP_EMAIL_VERIFICATION_ENABLED = 'false';
       process.env.MCP_EMAIL_VERIFICATION_CLEAR_AFTER_SECONDS = '90';
+      process.env.MCP_EMAIL_VERIFICATION_CONFIRM_COPY = 'true';
+      process.env.MCP_EMAIL_VERIFICATION_LINK_ACTION = 'copy';
 
       const config = await loadConfig(path.join(tmpDir, 'nonexistent.toml'));
 
       expect(config.settings.verification.enabled).toBe(false);
       expect(config.settings.verification.clearAfterSeconds).toBe(90);
+      expect(config.settings.verification.confirmCopy).toBe(true);
+      expect(config.settings.verification.linkAction).toBe('copy');
     });
   });
 

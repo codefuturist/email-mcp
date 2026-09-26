@@ -21,6 +21,7 @@ import { extractVerificationCode } from '../utils/verification-code.js';
 import { extractMagicLink } from '../utils/verification-link.js';
 import { isVerificationProcessed, markVerificationProcessed } from '../utils/verification-state.js';
 import type ClipboardService from './clipboard.service.js';
+import type DialogService from './dialog.service.js';
 import type { NewEmailEvent } from './event-bus.js';
 import eventBus from './event-bus.js';
 import type ImapService from './imap.service.js';
@@ -123,6 +124,8 @@ export default class VerificationCatcherService {
 
   private readonly clipboard: ClipboardService;
 
+  private readonly dialog: DialogService;
+
   /** Serializes event processing; also the drain point for settled(). */
   private queue: Promise<void> = Promise.resolve();
 
@@ -141,11 +144,13 @@ export default class VerificationCatcherService {
     imapService: ImapService,
     notifier: NotifierService,
     clipboard: ClipboardService,
+    dialog: DialogService,
   ) {
     this.config = config;
     this.imapService = imapService;
     this.notifier = notifier;
     this.clipboard = clipboard;
+    this.dialog = dialog;
   }
 
   start(): void {
@@ -217,35 +222,112 @@ export default class VerificationCatcherService {
   }
 
   private async act(hit: VerificationHit): Promise<void> {
-    const cfg = this.config;
-
-    let copied = false;
-    if (cfg.autoCopy) {
-      const result = await this.clipboard.copyConcealed(hit.value, {
-        clearAfterSeconds: cfg.clearAfterSeconds,
-      });
-      copied = result.ok;
-    }
-
-    if (cfg.notify) {
-      const clearsIn =
-        copied && cfg.clearAfterSeconds > 0 ? ` — clears in ${cfg.clearAfterSeconds}s` : '';
-      const title =
-        hit.kind === 'code'
-          ? `${copied ? '✅' : '🔐'} Code ${hit.display} from ${hit.service}`
-          : `🔗 Sign-in link from ${hit.service}`;
-      const body = copied
-        ? `Copied to clipboard${clearsIn}`
-        : `${hit.kind === 'code' ? 'Code' : 'Link'} found (auto-copy off)`;
-      await this.notifier.notifyRaw(title, body);
-    }
+    const action = hit.kind === 'code' ? await this.actOnCode(hit) : await this.actOnLink(hit);
 
     // Provenance only — never the value itself.
     await mcpLog(
       'info',
       'verification',
-      `Caught ${hit.kind} from ${hit.service} (${hit.account}/${hit.mailbox}, sender ${hit.from.address}, copied=${copied})`,
+      `Caught ${hit.kind} from ${hit.service} (${hit.account}/${hit.mailbox}, sender ${hit.from.address}, action=${action})`,
     ).catch(() => {});
+  }
+
+  private async actOnCode(hit: VerificationHit): Promise<string> {
+    const cfg = this.config;
+    if (!cfg.autoCopy) {
+      await this.notifyFound(hit, 'auto-copy off');
+      return 'notified';
+    }
+
+    if (cfg.confirmCopy) {
+      const res = await this.dialog.confirmAction(
+        `Code ${hit.display} from ${hit.service}`,
+        'Copy to clipboard?',
+        { buttons: ['Cancel', 'Copy'], defaultButton: 'Copy' },
+      );
+      if (res.outcome === 'declined') return 'declined';
+      if (res.outcome === 'unavailable') {
+        await this.notifyFound(hit, 'confirmation unavailable');
+        return 'notified';
+      }
+    }
+
+    return this.copyAndNotify(hit);
+  }
+
+  private async actOnLink(hit: VerificationHit): Promise<string> {
+    const cfg = this.config;
+    if (!cfg.autoCopy) {
+      await this.notifyFound(hit, 'auto-copy off');
+      return 'notified';
+    }
+
+    if (cfg.linkAction === 'open') {
+      // Opening a link from mail content is always confirmed — the dialog IS
+      // the offer; a spoofed sender must never auto-launch the browser.
+      const shownUrl = hit.value.length > 100 ? `${hit.value.slice(0, 100)}…` : hit.value;
+      const res = await this.dialog.confirmAction(
+        `Sign-in link from ${hit.service}`,
+        `Open in your default browser?\n\n${shownUrl}`,
+        { buttons: ['Cancel', 'Copy', 'Open'], defaultButton: 'Open' },
+      );
+      if (res.outcome === 'declined') return 'declined';
+      if (res.outcome === 'unavailable') {
+        await this.notifyFound(hit, 'confirmation unavailable');
+        return 'notified';
+      }
+      if (res.button === 'Open') {
+        const opened = await this.dialog.openUrl(hit.value);
+        if (opened) return 'opened';
+        await this.notifyFound(hit, 'browser launch failed');
+        return 'notified';
+      }
+      // 'Copy' button falls through to the clipboard path.
+    } else if (cfg.confirmCopy) {
+      const res = await this.dialog.confirmAction(
+        `Sign-in link from ${hit.service}`,
+        'Copy to clipboard?',
+        { buttons: ['Cancel', 'Copy'], defaultButton: 'Copy' },
+      );
+      if (res.outcome === 'declined') return 'declined';
+      if (res.outcome === 'unavailable') {
+        await this.notifyFound(hit, 'confirmation unavailable');
+        return 'notified';
+      }
+    }
+
+    return this.copyAndNotify(hit);
+  }
+
+  private async copyAndNotify(hit: VerificationHit): Promise<string> {
+    const cfg = this.config;
+    const write = await this.clipboard.copyConcealed(hit.value, {
+      clearAfterSeconds: cfg.clearAfterSeconds,
+    });
+    if (!write.ok) {
+      await this.notifyFound(hit, 'auto-copy off');
+      return 'copy-failed';
+    }
+    if (cfg.notify) {
+      const clearsIn = cfg.clearAfterSeconds > 0 ? ` — clears in ${cfg.clearAfterSeconds}s` : '';
+      const title =
+        hit.kind === 'code'
+          ? `✅ Code ${hit.display} from ${hit.service}`
+          : `🔗 Sign-in link from ${hit.service}`;
+      await this.notifier.notifyRaw(title, `Copied to clipboard${clearsIn}`);
+    }
+    return 'copied';
+  }
+
+  /** Notification-only outcome: the hit is surfaced but nothing was touched. */
+  private async notifyFound(hit: VerificationHit, reason: string): Promise<void> {
+    if (!this.config.notify) return;
+    const title =
+      hit.kind === 'code'
+        ? `🔐 Code ${hit.display} from ${hit.service}`
+        : `🔗 Sign-in link from ${hit.service}`;
+    const noun = hit.kind === 'code' ? 'Code' : 'Link';
+    await this.notifier.notifyRaw(title, `${noun} found (${reason})`);
   }
 }
 

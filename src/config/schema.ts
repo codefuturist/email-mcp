@@ -147,10 +147,14 @@ export const VerificationConfigSchema = z.object({
   enabled: z.boolean().default(true),
   /** Copy a caught code/link to the clipboard automatically. */
   auto_copy: z.boolean().default(true),
+  /** Ask with a native dialog before touching the clipboard (macOS). */
+  confirm_copy: z.boolean().default(false),
   /** Show a desktop notification when something is caught. */
   notify: z.boolean().default(true),
   /** Also catch sign-in magic links (used only when no code is found). */
   copy_links: z.boolean().default(true),
+  /** What to do with a caught link: offer to open it, or copy like a code. */
+  link_action: z.enum(['open', 'copy']).default('open'),
   /** Clear the clipboard after N seconds if it still holds our value. 0 = never. */
   clear_after_seconds: z.number().int().min(0).max(3600).default(60),
   /** Ignore messages older than this when they surface (IDLE replays, reconnects). */
@@ -168,8 +172,10 @@ export const SettingsSchema = z.object({
   verification: VerificationConfigSchema.default({
     enabled: true,
     auto_copy: true,
+    confirm_copy: false,
     notify: true,
     copy_links: true,
+    link_action: 'open',
     clear_after_seconds: 60,
     max_age_minutes: 10,
     accounts: [],
@@ -217,8 +223,10 @@ export const AppConfigFileSchema = z.object({
     verification: {
       enabled: true,
       auto_copy: true,
+      confirm_copy: false,
       notify: true,
       copy_links: true,
+      link_action: 'open' as const,
       clear_after_seconds: 60,
       max_age_minutes: 10,
       accounts: [],

@@ -31,6 +31,14 @@ function createMockNotifier() {
   return { notifyRaw: vi.fn().mockResolvedValue(undefined) };
 }
 
+function createMockDialog() {
+  return {
+    confirmAction: vi.fn().mockResolvedValue({ outcome: 'confirmed', button: 'Copy' }),
+    openUrl: vi.fn().mockResolvedValue(true),
+    dialogsSupported: true,
+  };
+}
+
 function createMockClipboard() {
   return {
     copyConcealed: vi.fn().mockResolvedValue({ ok: true, concealed: true }),
@@ -42,8 +50,10 @@ function buildConfig(overrides: Partial<VerificationConfig> = {}): VerificationC
   return {
     enabled: true,
     autoCopy: true,
+    confirmCopy: false,
     notify: true,
     copyLinks: true,
+    linkAction: 'open',
     clearAfterSeconds: 60,
     maxAgeMinutes: 10,
     accounts: [],
@@ -73,6 +83,7 @@ describe('VerificationCatcherService', () => {
   let imapService: ReturnType<typeof createMockImapService>;
   let notifier: ReturnType<typeof createMockNotifier>;
   let clipboard: ReturnType<typeof createMockClipboard>;
+  let dialog: ReturnType<typeof createMockDialog>;
   let catcher: VerificationCatcherService;
 
   beforeEach(() => {
@@ -81,6 +92,7 @@ describe('VerificationCatcherService', () => {
     imapService = createMockImapService();
     notifier = createMockNotifier();
     clipboard = createMockClipboard();
+    dialog = createMockDialog();
   });
 
   afterEach(() => {
@@ -98,6 +110,7 @@ describe('VerificationCatcherService', () => {
       imapService,
       notifier as never,
       clipboard as never,
+      dialog as never,
     );
     catcher.start();
     eventBus.emit('email:new', {
@@ -188,7 +201,9 @@ describe('VerificationCatcherService', () => {
         '<a href="https://github.com/login/verify?token=Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8">Sign in</a>',
     });
 
-    await deliver(buildConfig(), [buildMeta({ subject: 'Your sign-in link' })]);
+    await deliver(buildConfig({ linkAction: 'copy' }), [
+      buildMeta({ subject: 'Your sign-in link' }),
+    ]);
 
     expect(clipboard.copyConcealed).toHaveBeenCalledWith(
       'https://github.com/login/verify?token=Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8',
@@ -225,6 +240,87 @@ describe('VerificationCatcherService', () => {
 
     expect(clipboard.copyConcealed).toHaveBeenCalled();
     expect(notifier.notifyRaw).not.toHaveBeenCalled();
+  });
+
+  describe('confirm_copy', () => {
+    it('asks before copying and copies on confirmation', async () => {
+      await deliver(buildConfig({ confirmCopy: true }), [buildMeta()]);
+
+      expect(dialog.confirmAction).toHaveBeenCalledWith(
+        expect.stringContaining('482913'),
+        expect.any(String),
+        expect.objectContaining({ buttons: expect.arrayContaining(['Copy']) }),
+      );
+      expect(clipboard.copyConcealed).toHaveBeenCalledWith('482913', { clearAfterSeconds: 60 });
+    });
+
+    it('stays silent when the user declines', async () => {
+      dialog.confirmAction.mockResolvedValue({ outcome: 'declined' });
+
+      await deliver(buildConfig({ confirmCopy: true }), [buildMeta()]);
+
+      expect(clipboard.copyConcealed).not.toHaveBeenCalled();
+      expect(notifier.notifyRaw).not.toHaveBeenCalled();
+    });
+
+    it('degrades to a notification when no dialog is available', async () => {
+      dialog.confirmAction.mockResolvedValue({ outcome: 'unavailable' });
+
+      await deliver(buildConfig({ confirmCopy: true }), [buildMeta()]);
+
+      expect(clipboard.copyConcealed).not.toHaveBeenCalled();
+      expect(notifier.notifyRaw).toHaveBeenCalledWith(
+        expect.stringContaining('482913'),
+        expect.any(String),
+      );
+    });
+  });
+
+  describe('link_action = open', () => {
+    const linkBody = {
+      bodyText: undefined,
+      bodyHtml:
+        '<a href="https://github.com/login/verify?token=Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8">Sign in</a>',
+    };
+
+    it('offers to open and launches the browser on Open', async () => {
+      imapService.getEmail.mockResolvedValue(linkBody);
+      dialog.confirmAction.mockResolvedValue({ outcome: 'confirmed', button: 'Open' });
+
+      await deliver(buildConfig(), [buildMeta({ subject: 'Your sign-in link' })]);
+
+      expect(dialog.openUrl).toHaveBeenCalledWith(
+        'https://github.com/login/verify?token=Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8',
+      );
+      expect(clipboard.copyConcealed).not.toHaveBeenCalled();
+    });
+
+    it('copies instead when the user picks Copy in the dialog', async () => {
+      imapService.getEmail.mockResolvedValue(linkBody);
+      dialog.confirmAction.mockResolvedValue({ outcome: 'confirmed', button: 'Copy' });
+
+      await deliver(buildConfig(), [buildMeta({ subject: 'Your sign-in link' })]);
+
+      expect(dialog.openUrl).not.toHaveBeenCalled();
+      expect(clipboard.copyConcealed).toHaveBeenCalledWith(
+        'https://github.com/login/verify?token=Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8',
+        { clearAfterSeconds: 60 },
+      );
+    });
+
+    it('degrades to a notification when no dialog is available', async () => {
+      imapService.getEmail.mockResolvedValue(linkBody);
+      dialog.confirmAction.mockResolvedValue({ outcome: 'unavailable' });
+
+      await deliver(buildConfig(), [buildMeta({ subject: 'Your sign-in link' })]);
+
+      expect(dialog.openUrl).not.toHaveBeenCalled();
+      expect(clipboard.copyConcealed).not.toHaveBeenCalled();
+      expect(notifier.notifyRaw).toHaveBeenCalledWith(
+        expect.stringContaining('link'),
+        expect.any(String),
+      );
+    });
   });
 });
 

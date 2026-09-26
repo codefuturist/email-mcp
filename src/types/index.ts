@@ -141,8 +141,12 @@ export interface HooksConfig {
 export interface VerificationConfig {
   enabled: boolean;
   autoCopy: boolean;
+  /** Ask with a native dialog before touching the clipboard (macOS). */
+  confirmCopy: boolean;
   notify: boolean;
   copyLinks: boolean;
+  /** Caught links: offer to open in the browser, or copy like a code. */
+  linkAction: 'open' | 'copy';
   clearAfterSeconds: number;
   maxAgeMinutes: number;
   accounts: string[];
