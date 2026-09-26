@@ -22,6 +22,8 @@ import {
   text,
 } from '@clack/prompts';
 
+import { parse as parseTOML } from 'smol-toml';
+
 import {
   CONFIG_FILE,
   configExists,
@@ -29,6 +31,8 @@ import {
   loadRawConfig,
   saveConfigValidated,
 } from '../config/loader.js';
+import { AppConfigFileSchema } from '../config/schema.js';
+import { findConsistencyIssues, findUnknownKeys } from '../config/validate.js';
 import ensureInteractive, { assertNotCancel, CancelledError } from './guard.js';
 import type { FieldDescriptor, SectionDescriptor } from './settings-fields.js';
 import {
@@ -47,6 +51,8 @@ Subcommands:
   show            Show current configuration (passwords masked)
   edit [section]  Edit settings interactively
                   Sections: ${SETTINGS_SECTIONS.map((s) => s.id).join(', ')}
+  validate        Check the config file: syntax, schema, typo'd keys,
+                  cross-setting consistency (exit 1 on errors; CI-friendly)
   path            Print config file path
   init            Create a template config file
 `);
@@ -138,6 +144,89 @@ async function initConfig(): Promise<void> {
   log.success(`Template config created at ${CONFIG_FILE}`);
   log.info("Edit the file to add your email accounts, then run 'email-mcp test'.");
   outro('Done!');
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Static validation of the config file. Non-interactive and CI-friendly:
+ * exit code 1 on errors, 0 when valid (warnings allowed). Live connection
+ * checks stay in `email-mcp test`.
+ */
+async function validateConfig(): Promise<void> {
+  console.log(`Validating ${CONFIG_FILE}\n`);
+
+  if (!(await configExists())) {
+    console.error(`❌ No config file found at: ${CONFIG_FILE}`);
+    console.error(`   Run 'email-mcp account add' or 'email-mcp config init' to create one.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const fsp = await import('node:fs/promises');
+  const content = await fsp.readFile(CONFIG_FILE, 'utf-8');
+
+  let parsed: unknown;
+  try {
+    parsed = parseTOML(content);
+  } catch (err) {
+    console.error(`❌ TOML syntax error:\n   ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log('✅ TOML syntax');
+
+  let errorCount = 0;
+  let warningCount = 0;
+
+  const result = AppConfigFileSchema.safeParse(parsed);
+  if (result.success) {
+    console.log('✅ Schema (accounts and all settings sections)');
+  } else {
+    console.log('❌ Schema:');
+    for (const issue of result.error.issues) {
+      const where = issue.path.length > 0 ? issue.path.join('.') : '(root)';
+      console.log(`   ❌ ${where}: ${issue.message}`);
+      errorCount += 1;
+    }
+  }
+
+  const unknown = findUnknownKeys(parsed);
+  if (unknown.length === 0) {
+    console.log('✅ No unknown keys');
+  } else {
+    console.log('⚠️ Unknown keys (silently ignored by the server):');
+    for (const u of unknown) {
+      const hint = u.suggestion ? ` — did you mean "${u.suggestion}"?` : '';
+      console.log(`   ⚠️ ${u.path}${hint}`);
+      warningCount += 1;
+    }
+  }
+
+  if (result.success) {
+    const issues = findConsistencyIssues(result.data);
+    if (issues.length === 0) {
+      console.log('✅ Settings are consistent');
+    } else {
+      console.log('Consistency:');
+      for (const issue of issues) {
+        console.log(`   ${issue.severity === 'error' ? '❌' : '⚠️'} ${issue.message}`);
+        if (issue.severity === 'error') errorCount += 1;
+        else warningCount += 1;
+      }
+    }
+  }
+
+  console.log('');
+  if (errorCount > 0) {
+    console.error(`❌ Config invalid — ${errorCount} error(s), ${warningCount} warning(s).`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`✅ Config valid — ${warningCount} warning(s).`);
+  console.log(`   Live connection check: email-mcp test`);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +423,10 @@ export default async function runConfigCommand(
         return;
       case 'edit':
         await editSettings(sectionArg);
+        return;
+      case 'validate':
+      case 'check':
+        await validateConfig();
         return;
       case 'path':
         showPath();

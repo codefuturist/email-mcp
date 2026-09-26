@@ -24,11 +24,11 @@ export const SmtpConfigSchema = z.object({
       max_connections: z.number().int().min(1).default(1),
       max_messages: z.number().int().min(1).default(100),
     })
-    .default({
+    .default(() => ({
       enabled: true,
       max_connections: 1,
       max_messages: 100,
-    }),
+    })),
 });
 
 export const OAuth2ConfigSchema = z.object({
@@ -59,7 +59,7 @@ export const AccountConfigSchema = z
 
 export const WatcherConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  folders: z.array(z.string()).default(['INBOX']),
+  folders: z.array(z.string()).default(() => ['INBOX']),
   idle_timeout: z.number().int().min(60).max(1740).default(1740),
 });
 
@@ -88,7 +88,9 @@ export const AlertsConfigSchema = z.object({
   sound: z.boolean().default(false),
   urgency_threshold: z.enum(['urgent', 'high', 'normal', 'low']).default('high'),
   webhook_url: z.string().default(''),
-  webhook_events: z.array(z.enum(['urgent', 'high', 'normal', 'low'])).default(['urgent', 'high']),
+  webhook_events: z
+    .array(z.enum(['urgent', 'high', 'normal', 'low']))
+    .default((): ('urgent' | 'high' | 'normal' | 'low')[] => ['urgent', 'high']),
 });
 
 export const HooksConfigSchema = z.object({
@@ -101,14 +103,17 @@ export const HooksConfigSchema = z.object({
   batch_delay: z.number().int().min(1).max(60).default(5),
   custom_instructions: z.string().optional(),
   system_prompt: z.string().optional(),
-  rules: z.array(HookRuleSchema).default([]),
-  alerts: AlertsConfigSchema.default({
-    desktop: false,
-    sound: false,
-    urgency_threshold: 'high',
-    webhook_url: '',
-    webhook_events: ['urgent', 'high'],
-  }),
+  rules: z.array(HookRuleSchema).default(() => []),
+  alerts: AlertsConfigSchema.default(
+    () =>
+      ({
+        desktop: false,
+        sound: false,
+        urgency_threshold: 'high',
+        webhook_url: '',
+        webhook_events: ['urgent', 'high'],
+      }) as z.infer<typeof AlertsConfigSchema>,
+  ),
   auto_calendar: z.boolean().default(false),
   calendar_name: z.string().default(''),
   calendar_alarm_minutes: z.number().int().min(0).max(1440).default(15),
@@ -125,7 +130,7 @@ export const HooksConfigSchema = z.object({
 export const CacheConfigSchema = z.object({
   enabled: z.boolean().default(true),
   /** Mailboxes synced proactively. Others are still cached when read. */
-  mailboxes: z.array(z.string()).default(['INBOX']),
+  mailboxes: z.array(z.string()).default(() => ['INBOX']),
   /** How far back to mirror. 0 means no limit. */
   window_days: z.number().int().min(0).default(90),
   /** Newest N messages to prefetch bodies for; the rest cache on read. */
@@ -160,10 +165,10 @@ export const VerificationConfigSchema = z.object({
   /** Ignore messages older than this when they surface (IDLE replays, reconnects). */
   max_age_minutes: z.number().int().min(1).max(1440).default(10),
   /** Accounts to watch (empty = all). */
-  accounts: z.array(z.string()).default([]),
+  accounts: z.array(z.string()).default(() => []),
   /** Sender globs (hooks syntax). Empty allowlist = all senders. */
-  sender_allowlist: z.array(z.string()).default([]),
-  sender_denylist: z.array(z.string()).default([]),
+  sender_allowlist: z.array(z.string()).default(() => []),
+  sender_denylist: z.array(z.string()).default(() => []),
 });
 
 /**
@@ -179,123 +184,141 @@ export const ServerConfigSchema = z.object({
   /** Bearer token; empty = no auth (safe on loopback only). */
   token: z.string().default(''),
   /** Host-header allowlist for reverse-proxy setups (empty = loopback defaults). */
-  allowed_hosts: z.array(z.string()).default([]),
+  allowed_hosts: z.array(z.string()).default(() => []),
 });
 
 export const SettingsSchema = z.object({
   rate_limit: z.number().int().min(1).default(10),
   read_only: z.boolean().default(false),
-  server: ServerConfigSchema.default({
-    host: '127.0.0.1',
-    port: 8080,
-    path: '/mcp',
-    token: '',
-    allowed_hosts: [],
-  }),
-  verification: VerificationConfigSchema.default({
-    enabled: true,
-    auto_copy: true,
-    confirm_copy: false,
-    notify: true,
-    copy_links: true,
-    link_action: 'open',
-    clear_after_seconds: 60,
-    max_age_minutes: 10,
-    accounts: [],
-    sender_allowlist: [],
-    sender_denylist: [],
-  }),
-  cache: CacheConfigSchema.default({
-    enabled: true,
-    mailboxes: ['INBOX'],
-    window_days: 90,
-    body_messages: 500,
-    max_size_mb: 500,
-    sync_interval: 300,
-  }),
-  watcher: WatcherConfigSchema.default({
-    enabled: false,
-    folders: ['INBOX'],
-    idle_timeout: 1740,
-  }),
-  hooks: HooksConfigSchema.default({
-    on_new_email: 'notify',
-    preset: 'priority-focus',
-    auto_label: false,
-    auto_flag: false,
-    batch_delay: 5,
-    rules: [],
-    alerts: {
-      desktop: false,
-      sound: false,
-      urgency_threshold: 'high',
-      webhook_url: '',
-      webhook_events: ['urgent', 'high'],
-    },
-    auto_calendar: false,
-    calendar_name: '',
-    calendar_alarm_minutes: 15,
-    calendar_confirm: true,
-  }),
+  server: ServerConfigSchema.default(
+    () =>
+      ({
+        host: '127.0.0.1',
+        port: 8080,
+        path: '/mcp',
+        token: '',
+        allowed_hosts: [],
+      }) as z.infer<typeof ServerConfigSchema>,
+  ),
+  verification: VerificationConfigSchema.default(
+    () =>
+      ({
+        enabled: true,
+        auto_copy: true,
+        confirm_copy: false,
+        notify: true,
+        copy_links: true,
+        link_action: 'open',
+        clear_after_seconds: 60,
+        max_age_minutes: 10,
+        accounts: [],
+        sender_allowlist: [],
+        sender_denylist: [],
+      }) as z.infer<typeof VerificationConfigSchema>,
+  ),
+  cache: CacheConfigSchema.default(
+    () =>
+      ({
+        enabled: true,
+        mailboxes: ['INBOX'],
+        window_days: 90,
+        body_messages: 500,
+        max_size_mb: 500,
+        sync_interval: 300,
+      }) as z.infer<typeof CacheConfigSchema>,
+  ),
+  watcher: WatcherConfigSchema.default(
+    () =>
+      ({
+        enabled: false,
+        folders: ['INBOX'],
+        idle_timeout: 1740,
+      }) as z.infer<typeof WatcherConfigSchema>,
+  ),
+  hooks: HooksConfigSchema.default(
+    () =>
+      ({
+        on_new_email: 'notify',
+        preset: 'priority-focus',
+        auto_label: false,
+        auto_flag: false,
+        batch_delay: 5,
+        rules: [],
+        alerts: {
+          desktop: false,
+          sound: false,
+          urgency_threshold: 'high',
+          webhook_url: '',
+          webhook_events: ['urgent', 'high'],
+        },
+        auto_calendar: false,
+        calendar_name: '',
+        calendar_alarm_minutes: 15,
+        calendar_confirm: true,
+      }) as z.infer<typeof HooksConfigSchema>,
+  ),
 });
 
 export const AppConfigFileSchema = z.object({
-  settings: SettingsSchema.default({
-    rate_limit: 10,
-    read_only: false,
-    server: {
-      host: '127.0.0.1',
-      port: 8080,
-      path: '/mcp',
-      token: '',
-      allowed_hosts: [],
-    },
-    verification: {
-      enabled: true,
-      auto_copy: true,
-      confirm_copy: false,
-      notify: true,
-      copy_links: true,
-      link_action: 'open' as const,
-      clear_after_seconds: 60,
-      max_age_minutes: 10,
-      accounts: [],
-      sender_allowlist: [],
-      sender_denylist: [],
-    },
-    cache: {
-      enabled: true,
-      mailboxes: ['INBOX'],
-      window_days: 90,
-      body_messages: 500,
-      max_size_mb: 500,
-      sync_interval: 300,
-    },
-    watcher: {
-      enabled: false,
-      folders: ['INBOX'],
-      idle_timeout: 1740,
-    },
-    hooks: {
-      on_new_email: 'notify',
-      preset: 'priority-focus',
-      auto_label: false,
-      auto_flag: false,
-      batch_delay: 5,
-      rules: [],
-      alerts: {
-        desktop: false,
-        sound: false,
-        urgency_threshold: 'high',
-        webhook_url: '',
-        webhook_events: ['urgent', 'high'],
-      },
-      auto_calendar: false,
-      calendar_name: '',
-      calendar_alarm_minutes: 15,
-      calendar_confirm: true,
-    },
-  }),
+  settings: SettingsSchema.default(
+    () =>
+      ({
+        rate_limit: 10,
+        read_only: false,
+        server: {
+          host: '127.0.0.1',
+          port: 8080,
+          path: '/mcp',
+          token: '',
+          allowed_hosts: [],
+        },
+        verification: {
+          enabled: true,
+          auto_copy: true,
+          confirm_copy: false,
+          notify: true,
+          copy_links: true,
+          link_action: 'open' as const,
+          clear_after_seconds: 60,
+          max_age_minutes: 10,
+          accounts: [],
+          sender_allowlist: [],
+          sender_denylist: [],
+        },
+        cache: {
+          enabled: true,
+          mailboxes: ['INBOX'],
+          window_days: 90,
+          body_messages: 500,
+          max_size_mb: 500,
+          sync_interval: 300,
+        },
+        watcher: {
+          enabled: false,
+          folders: ['INBOX'],
+          idle_timeout: 1740,
+        },
+        hooks: {
+          on_new_email: 'notify',
+          preset: 'priority-focus',
+          auto_label: false,
+          auto_flag: false,
+          batch_delay: 5,
+          rules: [],
+          alerts: {
+            desktop: false,
+            sound: false,
+            urgency_threshold: 'high',
+            webhook_url: '',
+            webhook_events: ['urgent', 'high'],
+          },
+          auto_calendar: false,
+          calendar_name: '',
+          calendar_alarm_minutes: 15,
+          calendar_confirm: true,
+        },
+      }) as z.infer<typeof SettingsSchema>,
+  ),
   accounts: z.array(AccountConfigSchema).min(1, 'At least one account is required'),
 });
 

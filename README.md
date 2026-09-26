@@ -451,7 +451,8 @@ Commands:
   install status            Show registration status for detected clients
   install remove            Unregister email-mcp from MCP clients
   config show               Show config (passwords masked)
-  config edit [section]     Interactive settings editor (general, watcher, verification, cache, hooks, alerts)
+  config edit [section]     Interactive settings editor (general, server, watcher, verification, cache, hooks, alerts)
+  config validate           Check syntax, schema, typo'd keys, and cross-setting consistency
   config path               Print config file path
   config init               Create template config
   scheduler check           Process pending scheduled emails
@@ -464,7 +465,7 @@ Commands:
 
 ### Configuration
 
-Located at `$XDG_CONFIG_HOME/email-mcp/config.toml` (default: `~/.config/email-mcp/config.toml`). Edit it interactively with `email-mcp config edit [section]` — every save validates first and backs up the previous file to `config.toml.bak`. Note: programmatic saves rewrite the file without TOML comments (the backup keeps them).
+Located at `$XDG_CONFIG_HOME/email-mcp/config.toml` (default: `~/.config/email-mcp/config.toml`). Validate it with `email-mcp config validate` (TOML syntax, schema, typo'd keys with did-you-mean, cross-setting consistency; exit 1 on errors — CI-friendly) and edit it interactively with `email-mcp config edit [section]` — every save validates first and backs up the previous file to `config.toml.bak`. Note: programmatic saves rewrite the file without TOML comments (the backup keeps them).
 
 ```toml
 [settings]

@@ -58,6 +58,7 @@ Examples:
   email-mcp config show              # Show config (passwords masked)
   email-mcp config edit              # Edit settings interactively (pick a section)
   email-mcp config edit verification # Jump straight into a section
+  email-mcp config validate          # Syntax, schema, typo'd keys, consistency
   email-mcp config path              # Print config file path
   email-mcp config init              # Create template config
   email-mcp scheduler check          # Send overdue scheduled emails
