@@ -1,6 +1,6 @@
 {
   "name": "@codefuturist/email-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "mcpName": "io.github.codefuturist/email-mcp",
   "description": "Email MCP server with IMAP + SMTP support",
   "type": "module",
@@ -77,8 +77,8 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",
-    "@modelcontextprotocol/sdk": "^1.26.0",
     "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "imapflow": "^1.7.1",
     "node-ical": "^0.27.1",

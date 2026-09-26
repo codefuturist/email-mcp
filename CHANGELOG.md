@@ -32,6 +32,52 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/) 
 - add pnpm install and usage instructions - ([13c8d4b](https://github.com/codefuturist/email-mcp/commit/13c8d4bf3006fa4fb5f014eb630006a478082a23))
 
 - - -
+## [v0.4.0](https://github.com/codefuturist/email-mcp/compare/03b3b0233e5e65b1fa30324f3859860e061b364d..v0.4.0) - 2026-09-26
+#### ✨ Features
+- (**cache**) add offline-capable local mirror - ([29106e8](https://github.com/codefuturist/email-mcp/commit/29106e8059fb86d9b94bfdaa4640ffdd66d994d3)) - Kithrian, Claude Opus 5 (1M context)
+- (**cli**) server lifecycle commands for an always-on HTTP daemon - ([755eb39](https://github.com/codefuturist/email-mcp/commit/755eb3900bcdb7c11550a98aaf74b9671dce5711)) - Kithrian, Claude Fable 5
+- (**cli**) section editor for config edit + full config show - ([17efd45](https://github.com/codefuturist/email-mcp/commit/17efd45bfa6f90208fe47ef14f4828b9d03d4080)) - Kithrian, Claude Fable 5
+- (**cli**) settings field catalog - ([00d559b](https://github.com/codefuturist/email-mcp/commit/00d559bd43de94ad0f859463d2b9b0e61ff8b40f)) - Kithrian, Claude Fable 5
+- (**clipboard**) add zero-dep clipboard service with concealed writes - ([dad7045](https://github.com/codefuturist/email-mcp/commit/dad70451898f85f4f097c789b4b2a70edc1c6274)) - Kithrian, Claude Fable 5
+- (**config**) saveConfigValidated with backup - ([c2d0a9d](https://github.com/codefuturist/email-mcp/commit/c2d0a9d144d6531d2e70bbb5799532f9648c964d)) - Kithrian, Claude Fable 5
+- (**goreleaser**) use base.yaml + monorepo config - ([45beb34](https://github.com/codefuturist/email-mcp/commit/45beb34666e227909fda75e77a8677029ddbbe79)) - Colin, Copilot
+- (**notifier**) add notifyRaw for caller-controlled notifications - ([c688f60](https://github.com/codefuturist/email-mcp/commit/c688f600516ff0139a7bb3ea773f207fccab8fa2)) - Kithrian, Claude Fable 5
+- (**sdk**) migrate to MCP SDK v2 and modernize tooling - ([a309a67](https://github.com/codefuturist/email-mcp/commit/a309a6704ad1cd737d087f1e7ab57bb344156e79)) - Kithrian, Claude Opus 5 (1M context)
+- (**verification**) configure_verification tool with live catcher toggle - ([f9c8434](https://github.com/codefuturist/email-mcp/commit/f9c843468aaee2e2af027c9c0a1b91b69bd051da)) - Kithrian, Claude Fable 5
+- (**verification**) add confirm-before-copy and open-in-browser for links - ([6cd81e2](https://github.com/codefuturist/email-mcp/commit/6cd81e2b8bb4ad454b54f099e98ea91813bf2493)) - Kithrian, Claude Fable 5
+- (**verification**) expose get_verification_code and check_clipboard_setup - ([2d5b862](https://github.com/codefuturist/email-mcp/commit/2d5b8626624a6db3b77d4effa345fea2cad0036d)) - Kithrian, Claude Fable 5
+- (**verification**) add ambient catcher service and scanRecent - ([20e2da8](https://github.com/codefuturist/email-mcp/commit/20e2da80e74d6cd29f6ca8f3fdd45a5296c3dce0)) - Kithrian, Claude Fable 5
+- (**verification**) add one-shot dedup state with pruning - ([0f3f04f](https://github.com/codefuturist/email-mcp/commit/0f3f04f4fa4c5c3c6bfef600197502b0cb5f3fe2)) - Kithrian, Claude Fable 5
+- (**verification**) add [settings.verification] config section - ([c45f354](https://github.com/codefuturist/email-mcp/commit/c45f354df3ef3c4c8ea70b994c3e906f5e9bbd61)) - Kithrian, Claude Fable 5
+- (**verification**) add magic-link extractor - ([321dc80](https://github.com/codefuturist/email-mcp/commit/321dc8010b562d09dbd147391a3c1b73fd3923a5)) - Kithrian, Claude Fable 5
+- (**verification**) add scored OTP code extractor - ([4862d5f](https://github.com/codefuturist/email-mcp/commit/4862d5fa6ebc6c0f0bd570d19f395d135309b739)) - Kithrian, Claude Fable 5
+#### 🐛 Bug Fixes
+- (**hooks**) detach only own email:new listener on stop - ([d5ace5e](https://github.com/codefuturist/email-mcp/commit/d5ace5e3a4664c962f1b21a930f0bf03eadefc38)) - Kithrian, Claude Fable 5
+- (**imap**) report server rejections and stop deadlocking get_thread - ([7fe8916](https://github.com/codefuturist/email-mcp/commit/7fe8916b90fba852267894091a5e6d3ca1bf168d)) - Kithrian, Claude Opus 5 (1M context)
+- (**imap**) decode message bodies instead of returning raw source - ([439a1e5](https://github.com/codefuturist/email-mcp/commit/439a1e547cc24eed91b9acfada620065ff859283)) - Kithrian, Claude Opus 5 (1M context)
+- (**imap**) correct MIME and UID handling - ([5bd96af](https://github.com/codefuturist/email-mcp/commit/5bd96afdb65660e21acfd3386a11a9e81b7348f2)) - Kithrian, Claude Opus 5 (1M context)
+- (**release**) stage manifests in bump commit and push v-prefixed tag - ([57905c4](https://github.com/codefuturist/email-mcp/commit/57905c4751d58f746445e2a4e0dc12bec2d74f6d)) - Kithrian, Claude Fable 5
+- (**watcher,hooks**) repair flag writes and surface mailbox changes - ([606b1b5](https://github.com/codefuturist/email-mcp/commit/606b1b540c8afd582544290ec00e1ca2aa2789ee)) - Kithrian, Claude Opus 5 (1M context)
+- correct goreleaser base path - ([c24dd3e](https://github.com/codefuturist/email-mcp/commit/c24dd3e56fdfa71a11ee433e8edb11afda0302c9)) - Kithrian, Copilot
+- exclude lock files from biome pre-commit check - ([1e51628](https://github.com/codefuturist/email-mcp/commit/1e5162839fd007a7af0a68151f08236f2f32edaf)) - Colin, Copilot
+#### 📚 Documentation
+- (**config**) document interactive editor, backups, and 52 tools - ([944f9cf](https://github.com/codefuturist/email-mcp/commit/944f9cf941628b16f0d2d4e2e6db1539e8ce8979)) - Kithrian, Claude Fable 5
+- (**verification**) document instant OTP catch and update tool counts - ([dd251f7](https://github.com/codefuturist/email-mcp/commit/dd251f7cbbfa46b74033fbcf9be39500d18cc7d3)) - Kithrian, Claude Fable 5
+- add Mistral Vibe MCP client installation instructions - ([643fb18](https://github.com/codefuturist/email-mcp/commit/643fb18b9e0c3c241143991db6825d7ca174921a)) - Colin
+- add scheduler daemon setup instructions and delivery requirements - ([cbc3042](https://github.com/codefuturist/email-mcp/commit/cbc3042bcc4ae8c33e7586519b7065ba2b0f264d)) - Colin
+- expand VS Code Copilot setup (all 3 methods) and add Zed client - ([9e1f785](https://github.com/codefuturist/email-mcp/commit/9e1f78518833048c9fd56a37110d0dc54da538ce)) - Colin
+#### Tests
+- (**verification**) add GreenMail integration coverage - ([fdf8b7d](https://github.com/codefuturist/email-mcp/commit/fdf8b7d127b412cd57a555fdab32a126ad6086a9)) - Kithrian, Claude Fable 5
+#### ♻️ Refactoring
+- (**cli**) move cancel helpers into guard - ([060702d](https://github.com/codefuturist/email-mcp/commit/060702d613f7d261ab09a5efc9446e7a264d6fcf)) - Kithrian, Claude Fable 5
+- (**config**) route config writes through validated save - ([c45c7bf](https://github.com/codefuturist/email-mcp/commit/c45c7bfa01769b3a3c0d19a95e9fab75639f95b4)) - Kithrian, Claude Fable 5
+- (**utils**) extract glob matching and reply-chain stripping - ([d7ae7ca](https://github.com/codefuturist/email-mcp/commit/d7ae7cac8464aed0db12fcafde6a94e81d718ca8)) - Kithrian, Claude Fable 5
+#### Chores
+- normalize server.json formatting - ([4034b78](https://github.com/codefuturist/email-mcp/commit/4034b78715f1ab20306f969ec963b9f0df0aae4d)) - Colin, Copilot
+- fix cog post_bump_hooks to sync package.json and server.json versions - ([03b3b02](https://github.com/codefuturist/email-mcp/commit/03b3b0233e5e65b1fa30324f3859860e061b364d)) - Colin
+
+- - -
+
 ## [v0.2.1](https://github.com/codefuturist/email-mcp/compare/bd6f94d6f0d1f7f4beca5aa8061f2892a40f0ce0..v0.2.1) - 2026-02-20
 #### 🐛 Bug Fixes
 - (**labels**) fix critical parameter swap and multiple label bugs - ([bd6f94d](https://github.com/codefuturist/email-mcp/commit/bd6f94d6f0d1f7f4beca5aa8061f2892a40f0ce0)) - Colin
