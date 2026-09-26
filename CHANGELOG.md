@@ -32,6 +32,12 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/) 
 - add pnpm install and usage instructions - ([13c8d4b](https://github.com/codefuturist/email-mcp/commit/13c8d4bf3006fa4fb5f014eb630006a478082a23))
 
 - - -
+## [v0.4.1](https://github.com/codefuturist/email-mcp/compare/bae1bb7d5c6f603e34166c702eccaf190c0915a0..v0.4.1) - 2026-09-26
+#### Build
+- (**deps**) upgrade all dependencies to latest stable - ([bae1bb7](https://github.com/codefuturist/email-mcp/commit/bae1bb7d5c6f603e34166c702eccaf190c0915a0)) - Kithrian, Claude Fable 5
+
+- - -
+
 ## [v0.4.0](https://github.com/codefuturist/email-mcp/compare/03b3b0233e5e65b1fa30324f3859860e061b364d..v0.4.0) - 2026-09-26
 #### ✨ Features
 - (**cache**) add offline-capable local mirror - ([29106e8](https://github.com/codefuturist/email-mcp/commit/29106e8059fb86d9b94bfdaa4640ffdd66d994d3)) - Kithrian, Claude Opus 5 (1M context)
