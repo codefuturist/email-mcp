@@ -453,6 +453,7 @@ Commands:
   config show               Show config (passwords masked)
   config edit [section]     Interactive settings editor (general, server, watcher, verification, cache, hooks, alerts)
   config validate           Check syntax, schema, typo'd keys, and cross-setting consistency
+  completion zsh|bash|fish  Print shell completion script (accounts and sections complete dynamically)
   config path               Print config file path
   config init               Create template config
   scheduler check           Process pending scheduled emails
@@ -462,6 +463,23 @@ Commands:
   scheduler status          Show scheduler installation status
   help                      Show help
 ```
+
+### Shell completion
+
+```bash
+# zsh (one line in ~/.zshrc)
+source <(email-mcp completion zsh)
+
+# bash
+source <(email-mcp completion bash)
+
+# fish
+email-mcp completion fish > ~/.config/fish/completions/email-mcp.fish
+```
+
+Completions cover every command, subcommand, and flag — and complete **account
+names from your config** (`email-mcp test <TAB>`, `account edit <TAB>`) and
+**settings sections** (`config edit <TAB>`) dynamically.
 
 ### Configuration
 

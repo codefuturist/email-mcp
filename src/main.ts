@@ -34,6 +34,7 @@ Commands:
   config      Config management (show, edit, path, init)
   scheduler   Email scheduling management (check, list, install, uninstall, status)
   notify      Test and diagnose desktop notifications
+  completion  Print shell completion script (zsh, bash, fish)
   help        Show this help message
 
 Examples:
@@ -65,6 +66,7 @@ Examples:
   email-mcp scheduler install        # Install OS periodic check
   email-mcp notify test              # Send a test notification
   email-mcp notify status            # Check notification platform support
+  email-mcp completion zsh           # Shell completion (source <(…) in ~/.zshrc)
 `.trim();
 
 async function runServer(): Promise<void> {
@@ -117,6 +119,30 @@ async function main(): Promise<void> {
     case 'server': {
       const { default: runServerCommand } = await import('./cli/server-commands.js');
       await runServerCommand(process.argv.slice(3));
+      break;
+    }
+
+    case 'completion': {
+      const { default: runCompletionCommand } = await import('./cli/completion.js');
+      runCompletionCommand(process.argv[3]);
+      break;
+    }
+
+    // Hidden helper the completion scripts call for dynamic candidates.
+    // Must never fail or prompt — silence is a valid completion result.
+    case '__complete': {
+      try {
+        const { completionCandidates } = await import('./cli/completion.js');
+        const kind = process.argv[3] as 'accounts' | 'sections';
+        const needsConfig = kind === 'accounts';
+        const { loadConfig } = await import('./config/loader.js');
+        const config = needsConfig ? await loadConfig().catch(() => undefined) : undefined;
+        for (const candidate of completionCandidates(kind, config)) {
+          console.log(candidate);
+        }
+      } catch {
+        // Completion must stay silent on any failure.
+      }
       break;
     }
 
