@@ -7,7 +7,7 @@
  * - Graceful shutdown closes all connections
  */
 
-import { ImapFlow } from 'imapflow';
+import type { ImapFlow } from 'imapflow';
 import type { TransportConfig, Transporter } from 'nodemailer';
 import nodemailer from 'nodemailer';
 import { mcpLog } from '../logging.js';
@@ -15,6 +15,7 @@ import { mcpLog } from '../logging.js';
 import eventBus from '../services/event-bus.js';
 import type OAuthService from '../services/oauth.service.js';
 import type { AccountConfig } from '../types/index.js';
+import { createImapClient } from '../utils/imap-client.js';
 import type { IConnectionManager } from './types.js';
 
 type SmtpAuth =
@@ -91,7 +92,7 @@ export default class ConnectionManager implements IConnectionManager {
       auth = { user: account.username, pass: account.password };
     }
 
-    const client = new ImapFlow({
+    const client = createImapClient({
       host: account.imap.host,
       port: account.imap.port,
       secure: account.imap.tls,
@@ -220,7 +221,7 @@ export default class ConnectionManager implements IConnectionManager {
         auth = { user: account.username, pass: account.password };
       }
 
-      client = new ImapFlow({
+      client = createImapClient({
         host: account.imap.host,
         port: account.imap.port,
         secure: account.imap.tls,

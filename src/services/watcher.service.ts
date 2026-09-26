@@ -10,9 +10,10 @@
  * - Tracks last-seen UID per folder to detect genuinely new messages
  */
 
-import { ImapFlow } from 'imapflow';
+import type { ImapFlow } from 'imapflow';
 import { mcpLog } from '../logging.js';
 import type { AccountConfig, EmailMeta, WatcherConfig } from '../types/index.js';
+import { createImapClient } from '../utils/imap-client.js';
 import eventBus from './event-bus.js';
 import { messageToEmailMeta } from './imap.service.js';
 
@@ -135,7 +136,7 @@ export default class WatcherService {
         ? { user: state.account.username, accessToken: state.account.password }
         : { user: state.account.username, pass: state.account.password };
 
-      const client = new ImapFlow({
+      const client = createImapClient({
         host: state.account.imap.host,
         port: state.account.imap.port,
         secure: state.account.imap.tls,
