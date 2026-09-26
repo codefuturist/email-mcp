@@ -50,7 +50,8 @@ Examples:
   email-mcp install status           # Show client registration status
   email-mcp install remove           # Unregister from MCP clients
   email-mcp config show              # Show config (passwords masked)
-  email-mcp config edit              # Edit global settings
+  email-mcp config edit              # Edit settings interactively (pick a section)
+  email-mcp config edit verification # Jump straight into a section
   email-mcp config path              # Print config file path
   email-mcp config init              # Create template config
   email-mcp scheduler check          # Send overdue scheduled emails
@@ -126,7 +127,7 @@ async function main(): Promise<void> {
 
     case 'config': {
       const { default: runConfigCommand } = await import('./cli/config-commands.js');
-      await runConfigCommand(process.argv[3]);
+      await runConfigCommand(process.argv[3], process.argv[4]);
       break;
     }
 
