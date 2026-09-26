@@ -131,6 +131,22 @@ jobs:
             | .packages[0].version = $v
           ' server.json > server.tmp && mv server.tmp server.json
 
+      # The registry validates the npm version exists; right after a publish
+      # npm's CDN can lag a minute, so wait until the version resolves.
+      - name: Wait for npm propagation
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${INPUT_VERSION:-${GITHUB_REF#refs/tags/v}}"
+          for i in $(seq 1 30); do
+            if npm view "@codefuturist/email-mcp@$VERSION" version >/dev/null 2>&1; then
+              echo "npm has $VERSION (after ${i}0s)"; exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::@codefuturist/email-mcp@$VERSION not visible on npm after 5 minutes"
+          exit 1
+
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
 
