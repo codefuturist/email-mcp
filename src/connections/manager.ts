@@ -8,7 +8,7 @@
  */
 
 import { ImapFlow } from 'imapflow';
-import type { Transporter } from 'nodemailer';
+import type { TransportConfig, Transporter } from 'nodemailer';
 import nodemailer from 'nodemailer';
 import { mcpLog } from '../logging.js';
 
@@ -119,7 +119,7 @@ export default class ConnectionManager implements IConnectionManager {
   private static buildSmtpTransportOptions(
     account: AccountConfig,
     auth: SmtpAuth,
-  ): nodemailer.TransportOptions {
+  ): TransportConfig {
     const pool = account.smtp.pool ?? {
       enabled: true,
       maxConnections: 1,
@@ -143,7 +143,7 @@ export default class ConnectionManager implements IConnectionManager {
             maxMessages: pool.maxMessages,
           }
         : {}),
-    } as nodemailer.TransportOptions;
+    } as TransportConfig;
   }
 
   async getSmtpTransport(

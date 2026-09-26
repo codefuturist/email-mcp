@@ -28,7 +28,9 @@ export class CancelledError extends Error {
   }
 }
 
-export function assertNotCancel<T>(value: T | symbol): asserts value is T {
+// clack ≥1.8 types its cancel sentinel as a unique symbol, so narrowing via
+// `T | symbol` no longer sticks; excluding all symbols from T works for both.
+export function assertNotCancel<T>(value: T): asserts value is Exclude<T, symbol> {
   if (isCancel(value)) {
     cancel('Operation cancelled.');
     throw new CancelledError();
