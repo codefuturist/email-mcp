@@ -214,6 +214,9 @@ await probe('get_watcher_status', {});
 await probe('list_presets', {});
 await probe('get_hooks_config', {});
 await probe('check_notification_setup', {});
+// No copy_to_clipboard / test_write — smoke must not touch the OS clipboard.
+await probe('get_verification_code', { account, lookback_minutes: 60, wait_seconds: 0 });
+await probe('check_clipboard_setup', {});
 
 // --- writes: mailbox lifecycle (scratch folder) ----------------------------
 await probe('create_mailbox', { account, path: SCRATCH });

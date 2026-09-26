@@ -8,7 +8,7 @@
 
 An MCP (Model Context Protocol) server providing comprehensive email capabilities via IMAP and SMTP.
 
-Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 49 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, customizable presets and static rules, and a guided setup wizard.
+Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 51 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, instant verification-code catching with clipboard copy, customizable presets and static rules, and a guided setup wizard.
 
 Built on the MCP TypeScript SDK v2 (spec revision 2026-07-28), it serves over **stdio** for local clients or **Streamable HTTP** for networked access — existing stdio configurations keep working unchanged.
 
@@ -22,6 +22,7 @@ Built on the MCP TypeScript SDK v2 (spec revision 2026-07-28), it serves over **
 | Labels & bulk ops | ✅ provider-aware | ❌ |
 | Schedule future emails | ✅ | ❌ |
 | Real-time IMAP IDLE watcher | ✅ | ❌ |
+| Verification codes → clipboard | ✅ concealed + auto-clear | ❌ |
 | AI triage with presets | ✅ | ❌ |
 | Desktop & webhook alerts | ✅ | ❌ |
 | Calendar (ICS) extraction | ✅ | ❌ |
@@ -698,9 +699,59 @@ Features:
 - **Graceful degradation** — Falls back to notify mode if client doesn't support sampling
 - **Resource subscriptions** — Pushes `notifications/resources/updated` for unread counts
 
+#### Verification codes (instant OTP catch)
+
+When a mail carrying a verification code (OTP/2FA) or sign-in magic link arrives, email-mcp
+copies it to your clipboard within ~1–2 seconds and shows a notification —
+**“✅ Code 482913 from GitHub — Copied to clipboard, clears in 60s”**. Press ⌘V / Ctrl+V, done.
+
+Detection is scoring-based (English + German), not a bare digit regex: keyword proximity
+(`verification`, `Bestätigungscode`, `expires`, …) minus negative context (order numbers,
+invoices, tracking, Zoom passcodes, phone numbers, prices, dates). A miss beats a wrong
+code on your clipboard.
+
+```toml
+[settings.watcher]
+enabled = true              # REQUIRED for ambient catching (IMAP IDLE push)
+
+[settings.verification]
+enabled = true              # on by default
+auto_copy = true            # copy caught codes/links to the clipboard
+notify = true               # desktop notification on catch
+copy_links = true           # also catch magic links (only when no code found)
+clear_after_seconds = 60    # conditional auto-clear (0 = never)
+max_age_minutes = 10        # ignore stale messages (IDLE replays)
+accounts = []               # limit to specific accounts (empty = all)
+sender_allowlist = []       # e.g. ["*@github.com", "*@google.com"]
+sender_denylist = []
+```
+
+**Clipboard hygiene (macOS):** codes are written via a JXA `osascript` with the
+`org.nspasteboard.ConcealedType` marker — the same convention 1Password/Bitwarden use — so
+well-behaved clipboard managers (Maccy, Paste, …) never record them. The auto-clear is
+conditional: the clipboard is only cleared if it still holds the caught value, so anything
+you copied in the meantime is never stomped. Linux uses `wl-copy`/`xclip`, Windows uses
+PowerShell `Set-Clipboard` (no concealment convention exists there). Zero npm dependencies.
+
+**For agents:** `get_verification_code` fetches the newest code on demand — during an
+automated signup, call it with `wait_seconds = 30` and it returns the code seconds after
+the mail lands (event-driven with the watcher, 5 s polling without). If nothing arrives in
+time, it returns `found: false` with a hint — just call it again.
+
+**Security notes:** the clipboard is shared OS state — any app can read it while the code
+is there (that window is bounded by `clear_after_seconds`). The code itself is never
+written to server logs or the audit log; it does appear in `get_verification_code` results,
+which is the point of that tool. Kill switches: `enabled = false` (feature off) or
+`auto_copy = false` (notification only). Environment overrides: `MCP_EMAIL_VERIFICATION_*`
+(`_ENABLED`, `_AUTO_COPY`, `_NOTIFY`, `_COPY_LINKS`, `_CLEAR_AFTER_SECONDS`,
+`_MAX_AGE_MINUTES`, `_ACCOUNTS`, `_SENDER_ALLOWLIST`, `_SENDER_DENYLIST`).
+
+Use `check_clipboard_setup` to diagnose the pipeline (add `test_write = true` for a
+harmless copy → read-back → clear round-trip).
+
 ## API
 
-### Tools (49)
+### Tools (51)
 
 > **Structured output:** `list_emails`, `search_emails`, `get_email_status`, and `list_mailboxes` also return machine-readable results (`outputSchema` + `structuredContent`) alongside the human-readable text, for clients that consume typed tool output.
 
@@ -769,6 +820,13 @@ Features:
 | `configure_alerts` | Update alert/notification settings at runtime |
 | `check_notification_setup` | Diagnose desktop notification support and provide setup instructions |
 | `test_notification` | Send a test notification to verify OS permissions are configured |
+
+#### Verification (2)
+
+| Tool | Description |
+|------|-------------|
+| `get_verification_code` | Find (or wait up to 45 s for) the newest OTP/2FA code or sign-in magic link, with optional clipboard copy |
+| `check_clipboard_setup` | Diagnose clipboard integration (platform tools, concealed-write support) with optional round-trip test |
 
 #### Calendar & Reminders (6)
 
@@ -849,9 +907,11 @@ src/
 │   ├── watcher.service.ts — IMAP IDLE real-time watcher with auto-reconnect
 │   ├── hooks.service.ts   — AI triage via MCP sampling + static rules + auto-labeling/flagging
 │   ├── notifier.service.ts — Multi-channel notification dispatcher (desktop/sound/webhook)
+│   ├── clipboard.service.ts — Concealed clipboard writes for caught codes (zero deps)
+│   ├── verification-catcher.service.ts — Instant OTP/magic-link catch on new mail
 │   ├── presets.ts         — Built-in hook presets (inbox-zero, gtd, priority-focus, etc.)
 │   └── event-bus.ts       — Typed EventEmitter for internal email events
-├── tools/                 — MCP tool definitions (42)
+├── tools/                 — MCP tool definitions (51)
 ├── prompts/               — MCP prompt definitions (7)
 ├── resources/             — MCP resource definitions (6)
 ├── safety/                — Audit trail and rate limiter
