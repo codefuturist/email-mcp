@@ -58,6 +58,27 @@ export const mailboxListOutputSchema = z.object({
   mailboxes: z.array(mailboxSchema),
 });
 
+/** Structured result for `get_verification_code`. */
+export const verificationOutputSchema = z.object({
+  found: z.boolean(),
+  kind: z.enum(['code', 'link']).optional(),
+  code: z.string().optional(),
+  link: z.string().optional(),
+  from: z.string().optional(),
+  subject: z.string().optional(),
+  service: z.string().optional(),
+  account: z.string().optional(),
+  mailbox: z.string().optional(),
+  age_seconds: z.number().int().optional(),
+  confidence: z.enum(['high', 'medium', 'low']).optional(),
+  copied: z.boolean(),
+  /** Whether the clipboard write was hidden from clipboard managers. */
+  clipboard_concealed: z.boolean().optional(),
+  /** Whether IMAP IDLE watching is live (instant catching vs. polling). */
+  watcher_active: z.boolean(),
+  hint: z.string().optional(),
+});
+
 /** Structured result for `get_email_status`. */
 export const emailStatusOutputSchema = z.object({
   id: z.string(),

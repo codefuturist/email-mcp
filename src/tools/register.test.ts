@@ -23,6 +23,7 @@ vi.mock('./templates.tool.js', () => ({
   registerTemplateWriteTools: vi.fn(),
 }));
 vi.mock('./thread.tool.js', () => ({ default: vi.fn() }));
+vi.mock('./verification.tool.js', () => ({ default: vi.fn() }));
 vi.mock('./watcher.tool.js', () => ({ default: vi.fn() }));
 
 import registerAccountsTools from './accounts.tool.js';
@@ -35,6 +36,7 @@ import registerManageTools from './manage.tool.js';
 import registerSchedulerTools from './scheduler.tool.js';
 import registerSendTools from './send.tool.js';
 import { registerTemplateWriteTools } from './templates.tool.js';
+import registerVerificationTools from './verification.tool.js';
 
 function createConfig(readOnly: boolean): AppConfig {
   return {
@@ -100,10 +102,12 @@ describe('registerAllTools', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     // Read tools should always be registered
     expect(registerAccountsTools).toHaveBeenCalled();
     expect(registerEmailsTools).toHaveBeenCalled();
+    expect(registerVerificationTools).toHaveBeenCalled();
     // Write tools should be registered when NOT read-only
     expect(registerSendTools).toHaveBeenCalled();
     expect(registerManageTools).toHaveBeenCalled();
@@ -129,10 +133,13 @@ describe('registerAllTools', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     // Read tools should still be registered
     expect(registerAccountsTools).toHaveBeenCalled();
     expect(registerEmailsTools).toHaveBeenCalled();
+    // Clipboard copy is a local convenience, not a mailbox write
+    expect(registerVerificationTools).toHaveBeenCalled();
     // Write tools should NOT be registered
     expect(registerSendTools).not.toHaveBeenCalled();
     expect(registerManageTools).not.toHaveBeenCalled();

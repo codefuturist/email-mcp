@@ -8,6 +8,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import type ConnectionManager from '../connections/manager.js';
 import type CalendarService from '../services/calendar.service.js';
+import type ClipboardService from '../services/clipboard.service.js';
 import type HooksService from '../services/hooks.service.js';
 import type ImapService from '../services/imap.service.js';
 import type LocalCalendarService from '../services/local-calendar.service.js';
@@ -35,6 +36,7 @@ import registerSchedulerTools from './scheduler.tool.js';
 import registerSendTools from './send.tool.js';
 import { registerTemplateReadTools, registerTemplateWriteTools } from './templates.tool.js';
 import registerThreadTools from './thread.tool.js';
+import registerVerificationTools from './verification.tool.js';
 import registerWatcherTools from './watcher.tool.js';
 
 export default function registerAllTools(
@@ -50,6 +52,7 @@ export default function registerAllTools(
   schedulerService: SchedulerService,
   watcherService: WatcherService,
   hooksService: HooksService,
+  clipboardService: ClipboardService,
 ): void {
   const { readOnly } = config.settings;
 
@@ -72,6 +75,9 @@ export default function registerAllTools(
   registerHealthTools(server, connections, imapService);
   registerLocateTools(server, imapService);
   registerWatcherTools(server, watcherService, hooksService);
+  // Clipboard copy is a local convenience, not a mailbox write — registered
+  // in read-only mode too (same reasoning as test_notification).
+  registerVerificationTools(server, imapService, config, watcherService, clipboardService);
 
   // Write tools — skipped in read-only mode
   if (!readOnly) {

@@ -77,4 +77,8 @@ export class EmailEventBus extends EventEmitter<EmailEventMap> {}
 
 /** Singleton event bus shared across the application. */
 const eventBus = new EmailEventBus();
+// Steady-state listeners (hooks, sync engine, verification catcher) plus a
+// transient listener per concurrently waiting get_verification_code call —
+// headroom so legitimate concurrency never trips the max-listeners warning.
+eventBus.setMaxListeners(30);
 export default eventBus;

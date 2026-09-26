@@ -302,3 +302,53 @@ export async function scanRecent(
   }
   return undefined;
 }
+
+/**
+ * Scan now, then wait up to `waitSeconds` for a code/link to arrive.
+ *
+ * Event-augmented polling: an `email:new` event (watcher running) wakes the
+ * loop within ~1 s; without the watcher the 5 s poll is the correctness
+ * backstop, so the tool works either way. Re-scans accept only messages
+ * dated after the call started (minus one minute of clock slack) — the full
+ * `lookbackMs` window applies to the initial scan only. The transient
+ * listener is removed on every path.
+ */
+export async function waitForVerification(
+  imapService: ImapService,
+  accounts: string[],
+  mailbox: string,
+  lookbackMs: number,
+  waitSeconds: number,
+  opts: { copyLinks?: boolean } = {},
+): Promise<VerificationHit | undefined> {
+  const initial = await scanRecent(imapService, accounts, mailbox, lookbackMs, opts);
+  if (initial || waitSeconds <= 0) return initial;
+
+  const freshCutoff = Date.now() - 60_000;
+  const deadline = Date.now() + waitSeconds * 1000;
+
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+
+    let wakeHandler: ((event: NewEmailEvent) => void) | undefined;
+    let sleepTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await new Promise<void>((resolve) => {
+        wakeHandler = (event: NewEmailEvent): void => {
+          if (accounts.length > 0 && !accounts.includes(event.account)) return;
+          if (event.mailbox !== mailbox) return;
+          resolve();
+        };
+        eventBus.on('email:new', wakeHandler);
+        sleepTimer = setTimeout(resolve, Math.min(5000, remaining));
+      });
+    } finally {
+      if (wakeHandler) eventBus.off('email:new', wakeHandler);
+      if (sleepTimer) clearTimeout(sleepTimer);
+    }
+
+    const hit = await scanRecent(imapService, accounts, mailbox, Date.now() - freshCutoff, opts);
+    if (hit && Date.parse(hit.date) >= freshCutoff) return hit;
+  }
+  return undefined;
+}

@@ -19,6 +19,7 @@ import registerAllResources from './resources/register.js';
 import RateLimiter from './safety/rate-limiter.js';
 import createServer from './server.js';
 import CalendarService from './services/calendar.service.js';
+import ClipboardService from './services/clipboard.service.js';
 import HooksService from './services/hooks.service.js';
 import ImapService from './services/imap.service.js';
 import LocalCalendarService from './services/local-calendar.service.js';
@@ -27,6 +28,7 @@ import RemindersService from './services/reminders.service.js';
 import SchedulerService from './services/scheduler.service.js';
 import SmtpService from './services/smtp.service.js';
 import TemplateService from './services/template.service.js';
+import VerificationCatcherService from './services/verification-catcher.service.js';
 import WatcherService from './services/watcher.service.js';
 import registerAllTools from './tools/register.js';
 import type { AppConfig } from './types/index.js';
@@ -44,6 +46,8 @@ export interface AppServices {
   schedulerService: SchedulerService;
   watcherService: WatcherService;
   hooksService: HooksService;
+  clipboardService: ClipboardService;
+  verificationCatcher: VerificationCatcherService;
   /** Absent when the local mirror is disabled in config. */
   cacheStore?: CacheStore;
   syncEngine?: SyncEngine;
@@ -65,6 +69,15 @@ export async function buildServices(): Promise<AppServices> {
   const schedulerService = new SchedulerService(smtpService, imapService);
   const watcherService = new WatcherService(config.settings.watcher, config.accounts);
   const hooksService = new HooksService(config.settings.hooks, imapService);
+  const clipboardService = new ClipboardService();
+  // Shares the hooks notifier so desktop notifications from both features
+  // sit behind one rate limit (and one lifecycle — hooks owns stop()).
+  const verificationCatcher = new VerificationCatcherService(
+    config.settings.verification,
+    imapService,
+    hooksService.getNotifier(),
+    clipboardService,
+  );
 
   // The mirror is optional and must never block startup: if SQLite cannot be
   // opened (read-only volume, corrupt file, unwritable XDG dir) the server
@@ -100,6 +113,8 @@ export async function buildServices(): Promise<AppServices> {
     schedulerService,
     watcherService,
     hooksService,
+    clipboardService,
+    verificationCatcher,
     cacheStore,
     syncEngine,
   };
@@ -127,6 +142,7 @@ export function buildServer(services: AppServices): McpServer {
     services.schedulerService,
     services.watcherService,
     services.hooksService,
+    services.clipboardService,
   );
   registerAllResources(
     server,
@@ -157,13 +173,30 @@ export function startBackgroundServices(
   services: AppServices,
   lowLevelServer: Server | null,
 ): BackgroundHandle {
-  const { hooksService, watcherService, schedulerService, imapService, syncEngine, config } =
-    services;
+  const {
+    hooksService,
+    watcherService,
+    schedulerService,
+    imapService,
+    syncEngine,
+    verificationCatcher,
+    config,
+  } = services;
   let schedulerInterval: ReturnType<typeof setInterval> | undefined;
   let cacheInterval: ReturnType<typeof setInterval> | undefined;
 
   hooksService.start(lowLevelServer);
+  verificationCatcher.start();
   syncEngine?.start();
+
+  if (config.settings.verification.enabled && !config.settings.watcher.enabled) {
+    mcpLog(
+      'info',
+      'verification',
+      'Verification catching is enabled but [settings.watcher] is off — ambient auto-copy is ' +
+        'inactive. Enable the watcher for instant catching; get_verification_code works either way.',
+    ).catch(() => {});
+  }
 
   void (async () => {
     try {
@@ -219,6 +252,8 @@ export function startBackgroundServices(
     stop: async () => {
       if (schedulerInterval) clearInterval(schedulerInterval);
       if (cacheInterval) clearInterval(cacheInterval);
+      // Before hooksService.stop() — hooks owns the shared notifier interval.
+      verificationCatcher.stop();
       hooksService.stop();
       await watcherService.stop();
       syncEngine?.stop();

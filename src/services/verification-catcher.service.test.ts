@@ -1,7 +1,7 @@
 import type { EmailMeta, VerificationConfig } from '../types/index.js';
 import eventBus from './event-bus.js';
 import type ImapService from './imap.service.js';
-import VerificationCatcherService from './verification-catcher.service.js';
+import VerificationCatcherService, { waitForVerification } from './verification-catcher.service.js';
 
 vi.mock('../logging.js', () => ({
   mcpLog: vi.fn().mockResolvedValue(undefined),
@@ -225,5 +225,67 @@ describe('VerificationCatcherService', () => {
 
     expect(clipboard.copyConcealed).toHaveBeenCalled();
     expect(notifier.notifyRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe('waitForVerification', () => {
+  let imapService: ImapService & {
+    getEmail: ReturnType<typeof vi.fn>;
+    listEmails: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    imapService = {
+      listEmails: vi.fn().mockResolvedValue({ items: [] }),
+      getEmail: vi.fn().mockResolvedValue({
+        bodyText: 'Your verification code is 482913.',
+        bodyHtml: undefined,
+      }),
+    } as never;
+  });
+
+  afterEach(() => {
+    eventBus.removeAllListeners('email:new');
+    vi.useRealTimers();
+  });
+
+  it('returns an immediate hit without waiting', async () => {
+    imapService.listEmails.mockResolvedValue({ items: [buildMeta()] });
+
+    const hit = await waitForVerification(imapService, ['work'], 'INBOX', 900_000, 30);
+
+    expect(hit?.value).toBe('482913');
+    expect(imapService.listEmails).toHaveBeenCalledTimes(1);
+  });
+
+  it('wakes up early on an email:new event instead of waiting out the poll', async () => {
+    const pending = waitForVerification(imapService, ['work'], 'INBOX', 900_000, 30);
+    await vi.advanceTimersByTimeAsync(0);
+
+    imapService.listEmails.mockResolvedValue({ items: [buildMeta()] });
+    eventBus.emit('email:new', { account: 'work', mailbox: 'INBOX', emails: [buildMeta()] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const hit = await pending;
+    expect(hit?.value).toBe('482913');
+  });
+
+  it('returns undefined at the deadline when nothing arrives', async () => {
+    const pending = waitForVerification(imapService, ['work'], 'INBOX', 900_000, 6);
+    await vi.advanceTimersByTimeAsync(6_500);
+
+    expect(await pending).toBeUndefined();
+  });
+
+  it('leaves no listener behind after resolving', async () => {
+    const baseline = eventBus.listenerCount('email:new');
+
+    const pending = waitForVerification(imapService, ['work'], 'INBOX', 900_000, 6);
+    await vi.advanceTimersByTimeAsync(6_500);
+    await pending;
+
+    expect(eventBus.listenerCount('email:new')).toBe(baseline);
   });
 });
