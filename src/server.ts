@@ -7,15 +7,12 @@
  * both stdio and Streamable HTTP transports.
  */
 
-import { createRequire } from 'node:module';
-
 import { McpServer } from '@modelcontextprotocol/server';
 
-const esmRequire = createRequire(import.meta.url);
-const pkg = esmRequire('../package.json') as { version: string };
+import { PKG_VERSION } from './version.js';
 
 export const PKG_NAME = 'email-mcp';
-export const PKG_VERSION = pkg.version;
+export { PKG_VERSION };
 
 const INSTRUCTIONS = `Email MCP server exposing IMAP + SMTP over the Model Context Protocol.
 Start by calling \`list_accounts\` to discover configured accounts, then use

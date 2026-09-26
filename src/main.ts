@@ -11,11 +11,11 @@
  *   scheduler Email scheduling management
  */
 
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
-
+// Everything heavy is imported lazily inside each command arm: loading the
+// MCP SDK + service graph costs ~165 ms, which must not tax `--version`,
+// `config …`, or the shell-completion helper (TAB latency).
 import type { BackgroundHandle } from './app.js';
-import { buildServer, buildServices, startBackgroundServices } from './app.js';
-import { PKG_VERSION } from './server.js';
+import { PKG_VERSION } from './version.js';
 
 const HELP = `
 email-mcp — Email MCP Server (IMAP + SMTP)
@@ -70,6 +70,8 @@ Examples:
 `.trim();
 
 async function runServer(): Promise<void> {
+  const [{ serveStdio }, { buildServer, buildServices, startBackgroundServices }] =
+    await Promise.all([import('@modelcontextprotocol/server/stdio'), import('./app.js')]);
   const services = await buildServices();
 
   let background: BackgroundHandle | undefined;
