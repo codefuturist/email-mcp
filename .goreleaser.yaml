@@ -24,12 +24,34 @@ monorepo:
 includes:
   - from_file:
       path: config/goreleaser/base.yaml
+  - from_file:
+      path: config/goreleaser/atoms/archives/default.yaml
 
-# ── Build ────────────────────────────────────────────────────────────────────
-# No Go builds — this is a Node.js/TypeScript project.
-# The Dockerfile handles the full build pipeline (pnpm install → tsc → prune).
+# goreleaser's default ./dist collides with the tsc output directory —
+# `--clean` would wipe the compiled server. Keep release artifacts in build/.
+dist: build/goreleaser
+
+# ── Build (GoReleaser Pro Bun builder) ───────────────────────────────────────
+# Standalone native executables: minified + bytecode-precompiled (~32 ms cold
+# start, no Node.js at runtime). Mirrors atoms/builds/bun.yaml, inlined to set
+# the entrypoint and performance flags (included list blocks are replaced,
+# not merged). Requires `bun` on PATH and the pnpm-patched imapflow
+# (patches/) — Bun's node:tls rejects imapflow's `servername: false`.
 builds:
-  - skip: true
+  - id: email-mcp
+    builder: bun
+    main: ./src/main.ts
+    binary: email-mcp
+    targets:
+      - bun-linux-x64-modern
+      - bun-linux-arm64
+      - bun-darwin-x64
+      - bun-darwin-arm64
+      - bun-windows-x64-modern
+    # flags: ["--minify", "--bytecode"]  # goreleaser-pro 2.18.2 bug: any
+    # non-empty flags list injects an empty arg (bun: Invalid Argument '').
+    # The wrapper below appends the flags instead — see scripts/bun-goreleaser.sh.
+    tool: ./scripts/bun-goreleaser.sh
 
 # ── Docker images (project-specific) ────────────────────────────────────────
 # Two variants pushed to dual registries (GHCR + Docker Hub) with custom tag
