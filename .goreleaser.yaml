@@ -103,8 +103,10 @@ dockers_v2:
     dockerfile: Dockerfile
     extra_files:
       - src/
+      - patches/
       - package.json
       - pnpm-lock.yaml
+      - pnpm-workspace.yaml
       - tsconfig.build.json
       - tsconfig.json
       - biome.json
@@ -128,7 +130,7 @@ dockers_v2:
       - linux/arm64
     labels:
       org.opencontainers.image.title: email-mcp
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.url: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.version: "{{ .Version }}"
@@ -137,7 +139,7 @@ dockers_v2:
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.vendor: codefuturist
     annotations:
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.created: "{{ .Date }}"
@@ -147,8 +149,10 @@ dockers_v2:
     dockerfile: Dockerfile.alpine
     extra_files:
       - src/
+      - patches/
       - package.json
       - pnpm-lock.yaml
+      - pnpm-workspace.yaml
       - tsconfig.build.json
       - tsconfig.json
       - biome.json
@@ -165,7 +169,7 @@ dockers_v2:
       - linux/arm64
     labels:
       org.opencontainers.image.title: email-mcp
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.url: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.version: "{{ .Version }}"
@@ -174,7 +178,7 @@ dockers_v2:
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.vendor: codefuturist
     annotations:
-      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 47 tools, IMAP IDLE push, multi-account, AI triage"
+      org.opencontainers.image.description: "IMAP/SMTP email MCP server — 52 tools, IMAP IDLE push, multi-account, AI triage"
       org.opencontainers.image.source: "https://github.com/codefuturist/email-mcp"
       org.opencontainers.image.licenses: LGPL-3.0-or-later
       org.opencontainers.image.created: "{{ .Date }}"

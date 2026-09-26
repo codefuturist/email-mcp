@@ -7,7 +7,8 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.22.0 --activate
 
 # Install dependencies (layer cached unless lock changes)
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ patches/
 RUN pnpm install --frozen-lockfile
 
 # Build TypeScript
