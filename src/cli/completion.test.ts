@@ -71,6 +71,7 @@ describe('generated completion scripts', () => {
       'config',
       'scheduler',
       'notify',
+      'update',
       'completion',
       'help',
     ];

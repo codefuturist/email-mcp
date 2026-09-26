@@ -34,6 +34,7 @@ Commands:
   config      Config management (show, edit, path, init)
   scheduler   Email scheduling management (check, list, install, uninstall, status)
   notify      Test and diagnose desktop notifications
+  update      Self-update the binary to the latest GitHub release
   completion  Print shell completion script (zsh, bash, fish)
   help        Show this help message
 
@@ -66,6 +67,8 @@ Examples:
   email-mcp scheduler install        # Install OS periodic check
   email-mcp notify test              # Send a test notification
   email-mcp notify status            # Check notification platform support
+  email-mcp update                   # Update the binary to the latest release
+  email-mcp update --check           # Only check (exit code 1 = update available)
   email-mcp completion zsh           # Shell completion (source <(…) in ~/.zshrc)
 `.trim();
 
@@ -187,6 +190,12 @@ async function main(): Promise<void> {
     case 'notify': {
       const { default: runNotifyCommand } = await import('./cli/notify.js');
       await runNotifyCommand(process.argv[3]);
+      break;
+    }
+
+    case 'update': {
+      const { default: runUpdateCommand } = await import('./cli/update.js');
+      await runUpdateCommand(process.argv.slice(3));
       break;
     }
 
