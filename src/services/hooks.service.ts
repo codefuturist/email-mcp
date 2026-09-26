@@ -112,6 +112,15 @@ export default class HooksService {
 
   private static readonly MAX_SAMPLING_PER_MIN = 10;
 
+  /**
+   * Named handler so stop() can detach exactly this subscription. Other
+   * services (sync engine, verification catcher) share the same channel, so
+   * removeAllListeners here would silently unsubscribe them.
+   */
+  private readonly onNewEmailHandler = (event: NewEmailEvent): void => {
+    this.onNewEmail(event);
+  };
+
   constructor(config: HooksConfig, imapService: ImapService) {
     this.config = config;
     this.imapService = imapService;
@@ -147,9 +156,7 @@ export default class HooksService {
 
     if (this.config.onNewEmail === 'none') return;
 
-    eventBus.on('email:new', (event: NewEmailEvent) => {
-      this.onNewEmail(event);
-    });
+    eventBus.on('email:new', this.onNewEmailHandler);
 
     // Rate limit reset every 60s
     this.rateResetTimer = setInterval(() => {
@@ -179,7 +186,7 @@ export default class HooksService {
       this.rateResetTimer = null;
     }
     this.notifier.stop();
-    eventBus.removeAllListeners('email:new');
+    eventBus.off('email:new', this.onNewEmailHandler);
   }
 
   // -------------------------------------------------------------------------

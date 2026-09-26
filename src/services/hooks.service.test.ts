@@ -94,6 +94,23 @@ describe('HooksService', () => {
     await vi.advanceTimersByTimeAsync(config.batchDelay * 1000 + 50);
   }
 
+  describe('stop()', () => {
+    it('removes only its own email:new listener, leaving sibling subscribers intact', () => {
+      // SyncEngine and the verification catcher share the same channel; a
+      // stop() that calls removeAllListeners would silently unsubscribe them.
+      const sibling = vi.fn();
+      eventBus.on('email:new', sibling);
+
+      hooks = new HooksService(buildConfig(), imapService);
+      hooks.start(null);
+      hooks.stop();
+
+      eventBus.emit('email:new', { account: 'work', mailbox: 'INBOX', emails: [meta] });
+
+      expect(sibling).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('static rule actions', () => {
     it('flags a matching email with (account, emailId, mailbox) argument order', async () => {
       await deliver(
