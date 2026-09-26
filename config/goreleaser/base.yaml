@@ -1,0 +1,77 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Base: Shared Defaults                                       [GoReleaser Pro]
+#
+# Vendored from monorepository config/goreleaser/base.yaml (2026-09-26) so the
+# standalone repo's CI can run GoReleaser Pro without the monorepo checkout.
+# Divergence from upstream: release.github.name defaults to "email-mcp"
+# (upstream defaults to "monorepository"). Re-sync deliberately when the
+# upstream fragment changes.
+#
+# Provides: variables, metadata, release (GitHub), git, snapshot, checksums.
+# Required env: GITHUB_TOKEN
+# ──────────────────────────────────────────────────────────────────────────────
+
+version: 2
+
+# ── Custom Variables (Pro) ───────────────────────────────────────────────────
+# Projects override these in their own variables: block.
+# Use {{ .Var.foo }} to reference in any template expression.
+
+variables:
+  org: codefuturist
+  registry: ghcr.io/codefuturist
+  tap_owner: codefuturist
+  tap_repo: homebrew-tap
+  license: MIT
+  author_name: "goreleaser[bot]"
+  author_email: "goreleaser[bot]@users.noreply.github.com"
+  description: ""
+  homepage: "https://github.com/codefuturist/email-mcp"
+
+report_sizes: true
+
+# ── Metadata (Pro) ───────────────────────────────────────────────────────────
+
+metadata:
+  description: "{{ .Var.description }}"
+  homepage: "{{ .Var.homepage }}"
+  license: "{{ .Var.license }}"
+  maintainers:
+    - "Colin <colin@codefuturist.com>"
+  commit_author:
+    name: "{{ .Var.author_name }}"
+    email: "{{ .Var.author_email }}"
+
+# ── Release: GitHub ──────────────────────────────────────────────────────────
+
+release:
+  github:
+    owner: "{{ .Var.org }}"
+    name: '{{ envOrDefault "GITHUB_REPO_NAME" "email-mcp" }}'
+  draft: false
+  prerelease: auto
+  replace_existing_draft: true
+  replace_existing_artifacts: true
+  make_latest: true
+  name_template: "{{ .ProjectName }} v{{ .Version }}"
+  header: |
+    ## {{ .ProjectName }} v{{ .Version }}
+  mode: replace
+
+# ── Git (Pro) ────────────────────────────────────────────────────────────────
+
+git:
+  tag_sort: smartsemver
+  ignore_tags:
+    - nightly
+
+# ── Snapshot ─────────────────────────────────────────────────────────────────
+
+snapshot:
+  version_template: "{{ .Version }}-next+{{ .ShortCommit }}"
+
+# ── Checksums ────────────────────────────────────────────────────────────────
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256

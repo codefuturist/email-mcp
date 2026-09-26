@@ -91,9 +91,11 @@ bun run build:binaries        # release matrix: darwin-arm64/x64, linux-x64/arm6
                               # windows-x64 → build/release/*.{tar.gz,zip} + sha256 checksums
 ```
 
-Prebuilt binaries for every release are built by CI (same script, provenance-attested
-— verify with `gh attestation verify <asset> --repo codefuturist/email-mcp`) and ship
-with [GitHub releases](https://github.com/codefuturist/email-mcp/releases) —
+Prebuilt binaries for every release are built by CI with GoReleaser Pro
+(`.goreleaser.yaml`) for all common platforms — Linux glibc + musl, macOS, and
+Windows, each x64 + arm64 where Bun supports it — provenance-attested (verify with
+`gh attestation verify <asset> --repo codefuturist/email-mcp`) and shipped with
+[GitHub releases](https://github.com/codefuturist/email-mcp/releases) —
 installable via mise: `mise use -g ubi:codefuturist/email-mcp`.
 
 `server install` from the binary points the launchd login item at it. Requires the
