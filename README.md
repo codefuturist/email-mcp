@@ -98,6 +98,27 @@ Windows, each x64 + arm64 where Bun supports it — provenance-attested (verify 
 [GitHub releases](https://github.com/codefuturist/email-mcp/releases) —
 installable via mise: `mise use -g ubi:codefuturist/email-mcp`.
 
+The same binary can also be built locally from the published npm package (no
+checkout needed; ≥ 0.5.1, which carries the imapflow TLS fix at runtime —
+older versions need the repo's pnpm patch). Note that a plain `bun add -g`
+shim executes `dist/main.js` under node via its shebang, so the compile step
+is what buys the ~11 ms cold start:
+
+```bash
+bun add -g @codefuturist/email-mcp
+bun build --compile --minify --bytecode \
+  "${BUN_INSTALL:-$HOME/.bun}/install/global/node_modules/@codefuturist/email-mcp/dist/main.js" \
+  --outfile ~/.local/bin/email-mcp
+```
+
+An installed binary keeps itself current: `email-mcp update` checks the latest
+release and — after a confirmation, a sha256 check against the release's
+checksums file, and (when the `gh` CLI is present) a provenance-attestation
+check — atomically replaces itself. `--check` only reports (exit code 1 =
+update available), `--yes` skips the prompt for scripts. npm- and mise-managed
+installs are recognized and pointed at `npm install -g …@latest` /
+`mise upgrade` instead of being overwritten.
+
 `server install` from the binary points the launchd login item at it. Requires the
 bundled imapflow patch (`patches/`) — imapflow passes `servername: false` to
 tls.connect for IP hosts, which Bun's stricter node:tls rejects.
@@ -485,6 +506,7 @@ Commands:
   scheduler install         Install OS-level scheduler (launchd/crontab)
   scheduler uninstall       Remove OS-level scheduler
   scheduler status          Show scheduler installation status
+  update [--check|--yes]    Self-update the binary to the latest GitHub release
   help                      Show help
 ```
 
