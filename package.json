@@ -48,7 +48,8 @@
     "release:snapshot": "goreleaser release --snapshot --clean && pnpm docker:clean",
     "release:dry-run": "goreleaser release --skip=publish --clean && pnpm docker:clean",
     "prepublishOnly": "tsc -p tsconfig.build.json",
-    "build:binary": "bun build --compile src/main.ts --outfile build/email-mcp"
+    "build:binary": "bun build --compile --minify --bytecode src/main.ts --outfile build/email-mcp",
+    "build:binaries": "bash scripts/build-binaries.sh"
   },
   "keywords": [
     "email",
