@@ -8,7 +8,7 @@
 
 An MCP (Model Context Protocol) server providing comprehensive email capabilities via IMAP and SMTP.
 
-Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 51 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, instant verification-code catching with clipboard copy, customizable presets and static rules, and a guided setup wizard.
+Enables AI assistants to read, search, send, manage, schedule, and analyze emails across multiple accounts. Exposes 52 tools, 7 prompts, and 6 resources over the MCP protocol with OAuth2 support _(experimental)_, email scheduling, calendar extraction, analytics, provider-aware label management, real-time IMAP IDLE watcher with AI-powered triage, instant verification-code catching with clipboard copy, customizable presets and static rules, and a guided setup wizard.
 
 Built on the MCP TypeScript SDK v2 (spec revision 2026-07-28), it serves over **stdio** for local clients or **Streamable HTTP** for networked access — existing stdio configurations keep working unchanged.
 
@@ -402,7 +402,7 @@ Commands:
   install status            Show registration status for detected clients
   install remove            Unregister email-mcp from MCP clients
   config show               Show config (passwords masked)
-  config edit               Edit global settings (rate limit, read-only)
+  config edit [section]     Interactive settings editor (general, watcher, verification, cache, hooks, alerts)
   config path               Print config file path
   config init               Create template config
   scheduler check           Process pending scheduled emails
@@ -415,7 +415,7 @@ Commands:
 
 ### Configuration
 
-Located at `$XDG_CONFIG_HOME/email-mcp/config.toml` (default: `~/.config/email-mcp/config.toml`).
+Located at `$XDG_CONFIG_HOME/email-mcp/config.toml` (default: `~/.config/email-mcp/config.toml`). Edit it interactively with `email-mcp config edit [section]` — every save validates first and backs up the previous file to `config.toml.bak`. Note: programmatic saves rewrite the file without TOML comments (the backup keeps them).
 
 ```toml
 [settings]
@@ -763,7 +763,7 @@ harmless copy → read-back → clear round-trip).
 
 ## API
 
-### Tools (51)
+### Tools (52)
 
 > **Structured output:** `list_emails`, `search_emails`, `get_email_status`, and `list_mailboxes` also return machine-readable results (`outputSchema` + `structuredContent`) alongside the human-readable text, for clients that consume typed tool output.
 
@@ -833,12 +833,13 @@ harmless copy → read-back → clear round-trip).
 | `check_notification_setup` | Diagnose desktop notification support and provide setup instructions |
 | `test_notification` | Send a test notification to verify OS permissions are configured |
 
-#### Verification (2)
+#### Verification (3)
 
 | Tool | Description |
 |------|-------------|
 | `get_verification_code` | Find (or wait up to 45 s for) the newest OTP/2FA code or sign-in magic link, with optional clipboard copy |
 | `check_clipboard_setup` | Diagnose clipboard integration (platform tools, concealed-write support) with optional round-trip test |
+| `configure_verification` | Update verification-catching settings at runtime (incl. starting/stopping the catcher), optional persist to config file |
 
 #### Calendar & Reminders (6)
 
@@ -924,7 +925,7 @@ src/
 │   ├── verification-catcher.service.ts — Instant OTP/magic-link catch on new mail
 │   ├── presets.ts         — Built-in hook presets (inbox-zero, gtd, priority-focus, etc.)
 │   └── event-bus.ts       — Typed EventEmitter for internal email events
-├── tools/                 — MCP tool definitions (51)
+├── tools/                 — MCP tool definitions (52)
 ├── prompts/               — MCP prompt definitions (7)
 ├── resources/             — MCP resource definitions (6)
 ├── safety/                — Audit trail and rate limiter
