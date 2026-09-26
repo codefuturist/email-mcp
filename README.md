@@ -332,6 +332,28 @@ For MCP client configuration (e.g. Claude Desktop):
 ```
 </details>
 
+### Always-on server (detached)
+
+The stdio transport lives only as long as an MCP client keeps it open — which also
+means the IMAP watcher (and verification catching) stop with it. `email-mcp server`
+runs the Streamable HTTP server as a background service instead, iMCP-style:
+
+```bash
+email-mcp server start              # detached on http://127.0.0.1:8080/mcp
+email-mcp server start --port 3199  # any http flags pass through (--host, --token, …)
+email-mcp server start --attach     # foreground instead (Ctrl-C stops)
+email-mcp server status             # pid, address, /healthz, uptime
+email-mcp server logs -n 50         # tail the daemon log
+email-mcp server restart            # reuses the previous flags
+email-mcp server stop               # graceful SIGTERM (add --force for SIGKILL)
+```
+
+State lives in `$XDG_STATE_HOME/email-mcp/daemon.json`, logs in `server.log` next to
+it (rotated at 5 MB). `stop` only ever signals a process whose command line is
+verifiably this server (PID-reuse safe). Point HTTP-capable MCP clients at
+`http://127.0.0.1:8080/mcp`; binding non-loopback hosts still requires a token, as
+with `email-mcp http`.
+
 ### Streamable HTTP (networked)
 
 By default the server speaks MCP over **stdio**, ideal for local desktop clients (see the snippets above). For networked or remote access, run it as a **Streamable HTTP** server instead:
@@ -392,6 +414,11 @@ email-mcp [command]
 Commands:
   stdio                     Run as MCP server over stdio (default)
   http                      Run as MCP server over Streamable HTTP (networked)
+  server start [--attach]   Start an always-on HTTP server (detached by default)
+  server stop [--force]     Stop the detached server
+  server status             Show pid, address, health, uptime (exit 1 if stopped)
+  server restart            Stop and start again (reuses previous flags)
+  server logs [-n N]        Show the last N daemon log lines
   account list              List all configured accounts
   account add               Add a new email account interactively
   account edit [name]       Edit an existing account

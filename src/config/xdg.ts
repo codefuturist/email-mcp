@@ -51,6 +51,12 @@ export const CALENDAR_STATE_FILE = path.join(xdg.state, 'calendar-processed.json
 /** JSON state file tracking which emails the verification catcher already scanned */
 export const VERIFICATION_STATE_FILE = path.join(xdg.state, 'verification-processed.json');
 
+/** JSON record of the detached HTTP server started by `email-mcp server start` */
+export const DAEMON_STATE_FILE = path.join(xdg.state, 'daemon.json');
+
+/** Combined stdout/stderr log of the detached HTTP server */
+export const DAEMON_LOG_FILE = path.join(xdg.state, 'server.log');
+
 /**
  * Local mirror of server-side mail (envelopes, flags, bodies, search index).
  *

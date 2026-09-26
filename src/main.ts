@@ -26,6 +26,7 @@ Usage:
 Commands:
   stdio       Run as MCP server over stdio (default)
   http        Run as MCP server over Streamable HTTP (networked)
+  server      Lifecycle for an always-on HTTP server (start, stop, status, restart, logs)
   account     Account management (list, add, edit, delete)
   setup       Alias for 'account add'
   test        Test connections for all or a specific account
@@ -39,6 +40,10 @@ Examples:
   email-mcp                         # Start MCP server (stdio)
   email-mcp http --port 8080         # Start Streamable HTTP server on :8080/mcp
   email-mcp http --host 0.0.0.0 --port 8080   # Bind all interfaces (requires a token)
+  email-mcp server start             # Start detached (watcher keeps running, no client needed)
+  email-mcp server start --attach    # Same, but in the foreground (Ctrl-C stops)
+  email-mcp server status            # Is it running? (pid, address, health)
+  email-mcp server stop              # Stop the detached server
   email-mcp account list             # List configured accounts
   email-mcp account add              # Add a new email account
   email-mcp account edit personal    # Edit an account
@@ -104,6 +109,12 @@ async function main(): Promise<void> {
     case 'http': {
       const { default: runHttp } = await import('./cli/http.js');
       await runHttp(process.argv.slice(3));
+      break;
+    }
+
+    case 'server': {
+      const { default: runServerCommand } = await import('./cli/server-commands.js');
+      await runServerCommand(process.argv.slice(3));
       break;
     }
 
