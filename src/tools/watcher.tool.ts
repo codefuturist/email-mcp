@@ -5,7 +5,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import { loadRawConfig, saveConfig } from '../config/loader.js';
+import { loadRawConfig, saveConfigValidated } from '../config/loader.js';
 import type HooksService from '../services/hooks.service.js';
 import NotifierService from '../services/notifier.service.js';
 import { listPresets as listAllPresets } from '../services/presets.js';
@@ -360,7 +360,7 @@ export default function registerWatcherTools(
               webhook_url: updated.webhookUrl,
               webhook_events: updated.webhookEvents,
             };
-            await saveConfig(rawConfig);
+            await saveConfigValidated(rawConfig);
             persistMsg = '\n\n💾 Changes saved to config file.';
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);

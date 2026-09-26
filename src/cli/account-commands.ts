@@ -21,9 +21,8 @@ import {
   text,
 } from '@clack/prompts';
 
-import { CONFIG_FILE, configExists, loadRawConfig, saveConfig } from '../config/loader.js';
+import { CONFIG_FILE, configExists, loadRawConfig, saveConfigValidated } from '../config/loader.js';
 import type { RawAccountConfig, RawAppConfig } from '../config/schema.js';
-import { AppConfigFileSchema } from '../config/schema.js';
 import ConnectionManager from '../connections/manager.js';
 import type { AccountConfig } from '../types/index.js';
 import ensureInteractive, { assertNotCancel, CancelledError } from './guard.js';
@@ -535,8 +534,7 @@ async function addAccount(): Promise<void> {
         accounts: [newAccount],
       };
 
-  AppConfigFileSchema.parse(config);
-  await saveConfig(config);
+  await saveConfigValidated(config);
   log.success(`Account "${identity.name}" added. Config saved to ${CONFIG_FILE}`);
 
   note(
@@ -704,8 +702,7 @@ async function editAccount(nameArg?: string): Promise<void> {
     accounts: updatedAccounts,
   };
 
-  AppConfigFileSchema.parse(updatedConfig);
-  await saveConfig(updatedConfig);
+  await saveConfigValidated(updatedConfig);
   log.success(`Account "${identity.name}" updated. Config saved to ${CONFIG_FILE}`);
   outro('Done!');
 }
@@ -783,8 +780,7 @@ async function deleteAccount(nameArg?: string): Promise<void> {
     accounts: updatedAccounts,
   };
 
-  AppConfigFileSchema.parse(updatedConfig);
-  await saveConfig(updatedConfig);
+  await saveConfigValidated(updatedConfig);
   log.success(`Account "${target.name}" deleted. Config saved to ${CONFIG_FILE}`);
   outro('Done!');
 }
