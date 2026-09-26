@@ -295,6 +295,22 @@ export default class NotifierService {
   // Desktop notification — native OS commands, zero npm deps
   // -------------------------------------------------------------------------
 
+  /**
+   * Caller-controlled desktop notification. Bypasses AlertsConfig gating —
+   * callers with their own enable switch (verification catcher) decide for
+   * themselves — but keeps text sanitization and the shared per-minute
+   * desktop rate limit. Failure is non-fatal.
+   */
+  async notifyRaw(title: string, body: string, opts: { sound?: boolean } = {}): Promise<void> {
+    if (this.desktopCount >= NotifierService.MAX_DESKTOP_PER_MIN) return;
+    this.desktopCount += 1;
+    await NotifierService.dispatchDesktop(
+      sanitizeForShell(title),
+      sanitizeForShell(body),
+      opts.sound ?? false,
+    );
+  }
+
   private async sendDesktopNotification(payload: AlertPayload): Promise<void> {
     if (this.desktopCount >= NotifierService.MAX_DESKTOP_PER_MIN) return;
     this.desktopCount += 1;
@@ -307,13 +323,17 @@ export default class NotifierService {
     const body = `From: ${senderDisplay}\n${subject}`;
     const playSound = this.config.sound && payload.priority === 'urgent';
 
-    const { platform } = process;
+    await NotifierService.dispatchDesktop(title, body, playSound);
+  }
 
+  /** Route an already-sanitized notification to the platform tool. */
+  private static async dispatchDesktop(title: string, body: string, sound: boolean): Promise<void> {
+    const { platform } = process;
     try {
       if (platform === 'darwin') {
-        await NotifierService.execDarwin(title, body, playSound);
+        await NotifierService.execDarwin(title, body, sound);
       } else if (platform === 'linux') {
-        await NotifierService.execLinux(title, body, playSound);
+        await NotifierService.execLinux(title, body, sound);
       } else if (platform === 'win32') {
         await NotifierService.execWindows(title, body);
       }
