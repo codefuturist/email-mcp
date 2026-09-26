@@ -32,6 +32,19 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/) 
 - add pnpm install and usage instructions - ([13c8d4b](https://github.com/codefuturist/email-mcp/commit/13c8d4bf3006fa4fb5f014eb630006a478082a23))
 
 - - -
+## [v0.5.0](https://github.com/codefuturist/email-mcp/compare/98bc426dee923bfa3d4dbd874fadcad72c30eed5..v0.5.0) - 2026-09-26
+#### ✨ Features
+- (**cli**) shell completion for zsh, bash, and fish - ([e0c6563](https://github.com/codefuturist/email-mcp/commit/e0c6563780a1b04200c44ac6649cb0970b6a7e70)) - Kithrian, Claude Fable 5
+- (**cli**) config validate — syntax, schema, typo detection, consistency - ([bf09dcc](https://github.com/codefuturist/email-mcp/commit/bf09dcc1f087279812fe307647bf8e52198becd8)) - Kithrian, Claude Fable 5
+- (**server**) [settings.server] config section and launchd login item - ([98bc426](https://github.com/codefuturist/email-mcp/commit/98bc426dee923bfa3d4dbd874fadcad72c30eed5)) - Kithrian, Claude Fable 5
+#### ⚡ Performance
+- (**cli**) lazy-load the server graph — 3.8x faster CLI startup - ([a0f9ca6](https://github.com/codefuturist/email-mcp/commit/a0f9ca636a5b881a78c92d907c3d64a1a00b1902)) - Kithrian, Claude Fable 5
+#### Build
+- release binary matrix with minify and bytecode - ([7ddc0dc](https://github.com/codefuturist/email-mcp/commit/7ddc0dc5b83d0884f37bbecb8a256ffc0cbd0279)) - Kithrian, Claude Fable 5
+- bun single-binary support with patched imapflow - ([7ba90a5](https://github.com/codefuturist/email-mcp/commit/7ba90a513d0c0d9e21b3f4a62f56cb3680ac4859)) - Kithrian, Claude Fable 5
+
+- - -
+
 ## [v0.4.1](https://github.com/codefuturist/email-mcp/compare/bae1bb7d5c6f603e34166c702eccaf190c0915a0..v0.4.1) - 2026-09-26
 #### Build
 - (**deps**) upgrade all dependencies to latest stable - ([bae1bb7](https://github.com/codefuturist/email-mcp/commit/bae1bb7d5c6f603e34166c702eccaf190c0915a0)) - Kithrian, Claude Fable 5
