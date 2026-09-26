@@ -2,8 +2,29 @@ import {
   buildLaunchdPlist,
   looksLikeOurServer,
   parseServerArgs,
+  selfCommand,
   tailLines,
 } from './server-commands.js';
+
+describe('selfCommand', () => {
+  it('re-invokes node + entry when running as a script', () => {
+    expect(selfCommand('/usr/local/bin/node', '/x/dist/main.js')).toEqual([
+      '/usr/local/bin/node',
+      '/x/dist/main.js',
+    ]);
+  });
+
+  it('re-invokes the binary alone when compiled (bun/SEA — no .js entry)', () => {
+    expect(selfCommand('/Users/x/.local/bin/email-mcp', '/$bunfs/root/main')).toEqual([
+      '/Users/x/.local/bin/email-mcp',
+    ]);
+    expect(selfCommand('/opt/email-mcp', undefined)).toEqual(['/opt/email-mcp']);
+  });
+
+  it('refuses in a TS dev checkout (a spawned copy could not run .ts)', () => {
+    expect(selfCommand('/usr/local/bin/node', '/repo/src/main.ts')).toBeUndefined();
+  });
+});
 
 describe('parseServerArgs', () => {
   it('applies defaults (detached, loopback, port 8080)', () => {
@@ -82,7 +103,7 @@ describe('looksLikeOurServer', () => {
 
 describe('buildLaunchdPlist', () => {
   it('produces a KeepAlive login item running the http entry', () => {
-    const plist = buildLaunchdPlist('/usr/local/bin/node', '/x/dist/main.js', ['--port', '3199']);
+    const plist = buildLaunchdPlist(['/usr/local/bin/node', '/x/dist/main.js'], ['--port', '3199']);
 
     expect(plist).toContain('<string>com.email-mcp.server</string>');
     expect(plist).toContain('<key>KeepAlive</key>');
@@ -95,6 +116,13 @@ describe('buildLaunchdPlist', () => {
       lastIndex = idx;
     }
     expect(plist).toContain('server.log</string>');
+  });
+
+  it('supports a compiled single binary (no separate entry)', () => {
+    const plist = buildLaunchdPlist(['/Users/x/.local/bin/email-mcp'], []);
+    expect(plist).toContain('<string>/Users/x/.local/bin/email-mcp</string>');
+    expect(plist).toContain('<string>http</string>');
+    expect(plist).not.toContain('main.js');
   });
 });
 

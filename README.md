@@ -78,6 +78,19 @@ npm install -g @codefuturist/email-mcp
 pnpm add -g @codefuturist/email-mcp
 ```
 
+### Native binary (Bun)
+
+A dependency-free single binary (~63 MB) can be compiled with [Bun](https://bun.sh):
+
+```bash
+bun run build:binary        # or: mise x bun@latest -- bun build --compile src/main.ts --outfile build/email-mcp
+cp build/email-mcp ~/.local/bin/
+```
+
+No Node.js required at runtime; `server install` from the binary points the launchd
+login item at it. Requires the bundled imapflow patch (`patches/`) — imapflow passes
+`servername: false` to tls.connect for IP hosts, which Bun's stricter node:tls rejects.
+
 ### Docker
 
 No Node.js required — just Docker.

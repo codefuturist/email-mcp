@@ -124,12 +124,25 @@ export function tailLines(text: string, n: number): string {
 }
 
 /**
+ * How to re-invoke this CLI in a child process or launchd item:
+ * `[node, entry.js]` when running as a script, `[execPath]` alone when
+ * running as a compiled single binary (bun/SEA — argv[1] is virtual or
+ * absent), and `undefined` in a TS dev checkout (a spawned copy could not
+ * resolve TypeScript — use --attach there).
+ */
+export function selfCommand(execPath: string, entry: string | undefined): string[] | undefined {
+  if (entry?.endsWith('.js')) return [execPath, entry];
+  if (entry && /\.[cm]?ts$/.test(entry)) return undefined;
+  return [execPath];
+}
+
+/**
  * launchd login item: RunAtLoad + KeepAlive make the server start at login
  * and restart on crash — the config file (not flags) is its source of truth,
  * so passthrough is normally empty.
  */
-export function buildLaunchdPlist(execPath: string, entry: string, passthrough: string[]): string {
-  const programArgs = [execPath, entry, 'http', ...passthrough]
+export function buildLaunchdPlist(command: string[], passthrough: string[]): string {
+  const programArgs = [...command, 'http', ...passthrough]
     .map((a) => `    <string>${a}</string>`)
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -276,8 +289,8 @@ async function startServer(args: ServerArgs): Promise<void> {
   }
   await clearDaemonRecord();
 
-  const entry = process.argv[1];
-  if (!entry?.endsWith('.js')) {
+  const command = selfCommand(process.execPath, process.argv[1]);
+  if (!command) {
     throw new Error(
       'Detached mode needs the built entry point (dist/main.js or the installed ' +
         'email-mcp binary). In a dev checkout, use `server start --attach`.',
@@ -293,7 +306,7 @@ async function startServer(args: ServerArgs): Promise<void> {
   }
 
   const logFd = fs.openSync(DAEMON_LOG_FILE, 'a');
-  const child = spawn(process.execPath, [entry, 'http', ...args.passthrough], {
+  const child = spawn(command[0] as string, [...command.slice(1), 'http', ...args.passthrough], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
   });
@@ -425,8 +438,8 @@ async function installServer(args: ServerArgs): Promise<void> {
     return;
   }
 
-  const entry = process.argv[1];
-  if (!entry?.endsWith('.js')) {
+  const command = selfCommand(process.execPath, process.argv[1]);
+  if (!command) {
     throw new Error(
       'Install needs the built entry point (dist/main.js or the installed email-mcp binary).',
     );
@@ -444,7 +457,7 @@ async function installServer(args: ServerArgs): Promise<void> {
 
   await fsp.mkdir(path.dirname(LAUNCHD_PLIST), { recursive: true });
   await fsp.mkdir(path.dirname(DAEMON_LOG_FILE), { recursive: true });
-  await fsp.writeFile(LAUNCHD_PLIST, buildLaunchdPlist(process.execPath, entry, args.passthrough));
+  await fsp.writeFile(LAUNCHD_PLIST, buildLaunchdPlist(command, args.passthrough));
 
   await launchctl(['unload', LAUNCHD_PLIST]); // reload cleanly if it was loaded
   const loaded = await launchctl(['load', LAUNCHD_PLIST]);

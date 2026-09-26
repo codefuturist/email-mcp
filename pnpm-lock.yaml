@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  imapflow: 5b5a09cecc5544c17feea0928c83e6b8120e14b0a4dad17da274d776517a5404
+
 importers:
 
   .:
@@ -22,7 +25,7 @@ importers:
         version: 2.1.0
       imapflow:
         specifier: ^2.0.7
-        version: 2.0.7
+        version: 2.0.7(patch_hash=5b5a09cecc5544c17feea0928c83e6b8120e14b0a4dad17da274d776517a5404)
       node-ical:
         specifier: ^0.27.2
         version: 0.27.2
@@ -3172,7 +3175,7 @@ snapshots:
 
   ieee754@1.2.1: {}
 
-  imapflow@2.0.7:
+  imapflow@2.0.7(patch_hash=5b5a09cecc5544c17feea0928c83e6b8120e14b0a4dad17da274d776517a5404):
     dependencies:
       '@zone-eu/mailsplit': 5.4.17
       encoding-japanese: 2.4.0

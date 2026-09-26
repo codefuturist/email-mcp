@@ -6,3 +6,5 @@ allowBuilds:
   lefthook: true
   protobufjs: true
   ssh2: true
+patchedDependencies:
+  imapflow: patches/imapflow.patch
