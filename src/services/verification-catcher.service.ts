@@ -289,7 +289,16 @@ export async function scanRecent(
     }
   }
 
-  candidates.sort((a, b) => Date.parse(b.meta.date) - Date.parse(a.meta.date));
+  candidates.sort((a, b) => {
+    const dateDiff = Date.parse(b.meta.date) - Date.parse(a.meta.date);
+    if (dateDiff !== 0) return dateDiff;
+    // Date headers have second granularity; within one account the higher
+    // UID is the later arrival, so back-to-back mails still order correctly.
+    if (a.account === b.account) {
+      return (Number(b.meta.id) || 0) - (Number(a.meta.id) || 0);
+    }
+    return 0;
+  });
 
   for (const { account, meta } of candidates.slice(0, maxBodies)) {
     try {
