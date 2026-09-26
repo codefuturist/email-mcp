@@ -5,7 +5,7 @@
   "description": "Email MCP server with IMAP + SMTP support",
   "type": "module",
   "bin": {
-    "email-mcp": "./dist/main.js"
+    "email-mcp": "dist/main.js"
   },
   "main": "./dist/main.js",
   "types": "./dist/main.d.ts",
