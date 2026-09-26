@@ -26,25 +26,12 @@ import type { RawAccountConfig, RawAppConfig } from '../config/schema.js';
 import { AppConfigFileSchema } from '../config/schema.js';
 import ConnectionManager from '../connections/manager.js';
 import type { AccountConfig } from '../types/index.js';
-import ensureInteractive from './guard.js';
+import ensureInteractive, { assertNotCancel, CancelledError } from './guard.js';
 import { detectProvider } from './providers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-class CancelledError extends Error {
-  constructor() {
-    super('Operation cancelled.');
-  }
-}
-
-function assertNotCancel<T>(value: T | symbol): asserts value is T {
-  if (isCancel(value)) {
-    cancel('Operation cancelled.');
-    throw new CancelledError();
-  }
-}
 
 function formatSecurity(tls: boolean, starttls: boolean): string {
   if (tls) return 'TLS';
