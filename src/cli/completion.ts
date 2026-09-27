@@ -131,6 +131,14 @@ export const COMMANDS: CommandSpec[] = [
     ],
   },
   {
+    name: 'update',
+    description: 'Self-update the binary to the latest release',
+    flags: [
+      { flag: '--check', description: 'Only check; exit code 1 if an update is available' },
+      { flag: '--yes', description: 'Update without asking for confirmation' },
+    ],
+  },
+  {
     name: 'completion',
     description: 'Print shell completion script',
     subcommands: [
