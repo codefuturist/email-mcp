@@ -220,7 +220,16 @@ export default async function runHttp(argv: string[]): Promise<void> {
         return;
       }
 
-      await transport.handleRequest(req, res);
+      // Stateless HTTP: the SDK's NodeStreamableHTTPServerTransport is
+      // single-shot in stateless mode: one shared instance wedges after the
+      // first request (every later request 500s). Build a fresh
+      // transport+server per request; app.ts marks buildServer safe for
+      // exactly this ("per request (stateless HTTP)"). Services are shared
+      // singletons, only the thin protocol wrapper is new.
+      const reqServer = buildServer(services);
+      const reqTransport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      await reqServer.connect(reqTransport);
+      await reqTransport.handleRequest(req, res);
     })().catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[email-mcp] http request error: ${message}\n`);
