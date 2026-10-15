@@ -1,4 +1,4 @@
-import CacheStore from './store.js';
+import CacheStore, { PUT_CHUNK_SIZE } from './store.js';
 
 function makeMessage(overrides: Record<string, unknown> = {}) {
   return {
@@ -20,7 +20,7 @@ function makeMessage(overrides: Record<string, unknown> = {}) {
 describe('CacheStore', () => {
   let store: CacheStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
   });
 
@@ -28,9 +28,9 @@ describe('CacheStore', () => {
     store.close();
   });
 
-  describe('messages', () => {
-    it('round-trips a message', () => {
-      store.putMessages([makeMessage()]);
+  describe('messages', async () => {
+    it('round-trips a message', async () => {
+      await store.putMessages([makeMessage()]);
 
       const found = store.getMessage('work', 'INBOX', 1, '100');
 
@@ -42,37 +42,63 @@ describe('CacheStore', () => {
       });
     });
 
-    it('returns undefined for a message from a different UIDVALIDITY', () => {
-      store.putMessages([makeMessage({ uidValidity: '100' })]);
+    it('returns undefined for a message from a different UIDVALIDITY', async () => {
+      await store.putMessages([makeMessage({ uidValidity: '100' })]);
 
       // Same UID, new epoch — this is a different message entirely.
       expect(store.getMessage('work', 'INBOX', 1, '999')).toBeUndefined();
     });
 
-    it('upserts rather than duplicating on re-sync', () => {
-      store.putMessages([makeMessage({ flags: ['\\Seen'] })]);
-      store.putMessages([makeMessage({ flags: ['\\Seen', '\\Flagged'] })]);
+    it('upserts rather than duplicating on re-sync', async () => {
+      await store.putMessages([makeMessage({ flags: ['\\Seen'] })]);
+      await store.putMessages([makeMessage({ flags: ['\\Seen', '\\Flagged'] })]);
 
       expect(store.getMessage('work', 'INBOX', 1, '100')?.flags).toEqual(['\\Seen', '\\Flagged']);
       expect(store.countMessages('work', 'INBOX')).toBe(1);
     });
 
-    it('preserves an already-fetched body when re-syncing metadata', () => {
-      store.putMessages([makeMessage()]);
+    it('preserves an already-fetched body when re-syncing metadata', async () => {
+      await store.putMessages([makeMessage()]);
       store.putBody('work', 'INBOX', 1, '100', { text: 'the full body text' });
 
       // A metadata resync (e.g. a flag change) must not wipe the body and
       // force another download.
-      store.putMessages([makeMessage({ flags: ['\\Seen', '\\Flagged'] })]);
+      await store.putMessages([makeMessage({ flags: ['\\Seen', '\\Flagged'] })]);
 
       expect(store.getMessage('work', 'INBOX', 1, '100')?.bodyText).toBe('the full body text');
     });
+
+    it('stores more rows than one chunk across multiple transactions', async () => {
+      const total = PUT_CHUNK_SIZE * 2 + 7;
+      await store.putMessages(
+        Array.from({ length: total }, (_, i) =>
+          makeMessage({ uid: i + 1, messageId: `<${i + 1}@example.com>` }),
+        ),
+      );
+
+      expect(store.countMessages('work', 'INBOX')).toBe(total);
+    });
+
+    it('yields to the event loop between chunks', async () => {
+      // A synchronous whole-batch write would keep the loop blocked until the
+      // last row, so this callback could not run before putMessages resolved.
+      let yielded = false;
+      setImmediate(() => {
+        yielded = true;
+      });
+
+      await store.putMessages(
+        Array.from({ length: PUT_CHUNK_SIZE * 2 + 1 }, (_, i) => makeMessage({ uid: i + 1 })),
+      );
+
+      expect(yielded).toBe(true);
+    });
   });
 
-  describe('pagination', () => {
-    beforeEach(() => {
+  describe('pagination', async () => {
+    beforeEach(async () => {
       const base = Date.parse('2026-08-01T10:00:00Z');
-      store.putMessages(
+      await store.putMessages(
         Array.from({ length: 25 }, (_, i) =>
           makeMessage({
             uid: i + 1,
@@ -101,9 +127,9 @@ describe('CacheStore', () => {
     });
   });
 
-  describe('full-text search', () => {
-    it('finds a message by body text', () => {
-      store.putMessages([makeMessage({ uid: 1, subject: 'Rechnung' })]);
+  describe('full-text search', async () => {
+    it('finds a message by body text', async () => {
+      await store.putMessages([makeMessage({ uid: 1, subject: 'Rechnung' })]);
       store.putBody('work', 'INBOX', 1, '100', { text: 'Anbei die Rechnung für August.' });
 
       const hits = store.searchMessages('work', 'INBOX', '100', 'Rechnung');
@@ -111,8 +137,8 @@ describe('CacheStore', () => {
       expect(hits.map((m) => m.uid)).toEqual([1]);
     });
 
-    it('does not return a message after it is purged', () => {
-      store.putMessages([makeMessage({ uid: 1 })]);
+    it('does not return a message after it is purged', async () => {
+      await store.putMessages([makeMessage({ uid: 1 })]);
       store.putBody('work', 'INBOX', 1, '100', { text: 'findable text' });
       store.deleteMessages('work', 'INBOX', [1], '100');
 
@@ -142,14 +168,14 @@ describe('CacheStore', () => {
       expect(state?.syncTier).toBe('qresync');
     });
 
-    it('purges every message of the old epoch when UIDVALIDITY changes', () => {
+    it('purges every message of the old epoch when UIDVALIDITY changes', async () => {
       store.putMailboxState({
         account: 'work',
         mailbox: 'INBOX',
         uidValidity: '100',
         syncTier: 'baseline',
       });
-      store.putMessages([makeMessage({ uid: 1 }), makeMessage({ uid: 2 })]);
+      await store.putMessages([makeMessage({ uid: 1 }), makeMessage({ uid: 2 })]);
 
       const purged = store.resetEpoch('work', 'INBOX', '200');
 
@@ -158,8 +184,8 @@ describe('CacheStore', () => {
       expect(store.getMailboxState('work', 'INBOX')?.uidValidity).toBe('200');
     });
 
-    it('leaves other mailboxes untouched when one epoch resets', () => {
-      store.putMessages([
+    it('leaves other mailboxes untouched when one epoch resets', async () => {
+      await store.putMessages([
         makeMessage({ uid: 1, mailbox: 'INBOX' }),
         makeMessage({ uid: 1, mailbox: 'Archive' }),
       ]);
@@ -174,7 +200,7 @@ describe('CacheStore', () => {
 describe('attachment names', () => {
   let store: CacheStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
   });
 
@@ -182,8 +208,8 @@ describe('attachment names', () => {
     store.close();
   });
 
-  it('round-trips attachment names', () => {
-    store.putMessages([
+  it('round-trips attachment names', async () => {
+    await store.putMessages([
       makeMessage({ hasAttachments: true, attachmentNames: ['Q3 report.pdf', 'invoice.xlsx'] }),
     ]);
 
@@ -193,14 +219,14 @@ describe('attachment names', () => {
     ]);
   });
 
-  it('returns an empty list when a message has no attachments', () => {
-    store.putMessages([makeMessage()]);
+  it('returns an empty list when a message has no attachments', async () => {
+    await store.putMessages([makeMessage()]);
 
     expect(store.getMessage('work', 'INBOX', 1, '100')?.attachmentNames).toEqual([]);
   });
 
-  it('finds messages by attachment filename via full-text search', () => {
-    store.putMessages([
+  it('finds messages by attachment filename via full-text search', async () => {
+    await store.putMessages([
       makeMessage({
         uid: 1,
         subject: 'Quarterly numbers',
@@ -219,10 +245,10 @@ describe('attachment names', () => {
 describe('schema v3: flag columns and filtered listing', () => {
   let store: CacheStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
     const base = Date.parse('2026-08-01T10:00:00Z');
-    store.putMessages([
+    await store.putMessages([
       makeMessage({
         uid: 1,
         subject: 'Invoice August',
@@ -314,8 +340,8 @@ describe('schema v3: flag columns and filtered listing', () => {
     expect(msg?.flagged).toBe(true);
   });
 
-  it('treats flag order as irrelevant when deciding whether a row changed', () => {
-    store.putMessages([makeMessage({ uid: 7, flags: ['\\Seen', '\\Flagged'] })]);
+  it('treats flag order as irrelevant when deciding whether a row changed', async () => {
+    await store.putMessages([makeMessage({ uid: 7, flags: ['\\Seen', '\\Flagged'] })]);
 
     const updated = store.reconcileFlags('work', 'INBOX', '100', [
       { uid: 7, flags: ['\\Flagged', '\\Seen'] },
@@ -324,8 +350,8 @@ describe('schema v3: flag columns and filtered listing', () => {
     expect(updated).toBe(0);
   });
 
-  it('round-trips a stable email id', () => {
-    store.putMessages([makeMessage({ uid: 9, emailId: 'em-123' })]);
+  it('round-trips a stable email id', async () => {
+    await store.putMessages([makeMessage({ uid: 9, emailId: 'em-123' })]);
 
     expect(store.getMessage('work', 'INBOX', 9, '100')?.emailId).toBe('em-123');
   });
@@ -334,9 +360,13 @@ describe('schema v3: flag columns and filtered listing', () => {
 describe('schema v3: body tier plumbing', () => {
   let store: CacheStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
-    store.putMessages([makeMessage({ uid: 1 }), makeMessage({ uid: 2 }), makeMessage({ uid: 3 })]);
+    await store.putMessages([
+      makeMessage({ uid: 1 }),
+      makeMessage({ uid: 2 }),
+      makeMessage({ uid: 3 }),
+    ]);
   });
 
   afterEach(() => {
@@ -359,7 +389,7 @@ describe('schema v3: body tier plumbing', () => {
     expect(msg?.bodyFetchedAt).toBeDefined();
   });
 
-  it('preserves body, preview and headers across a metadata resync', () => {
+  it('preserves body, preview and headers across a metadata resync', async () => {
     store.putBody('work', 'INBOX', 1, '100', {
       text: 'the body',
       preview: 'the preview',
@@ -367,7 +397,7 @@ describe('schema v3: body tier plumbing', () => {
     });
 
     // A flag-change resync re-upserts the row; downloaded content must stay.
-    store.putMessages([makeMessage({ uid: 1, flags: ['\\Seen', '\\Flagged'] })]);
+    await store.putMessages([makeMessage({ uid: 1, flags: ['\\Seen', '\\Flagged'] })]);
 
     const msg = store.getMessage('work', 'INBOX', 1, '100');
     expect(msg?.bodyText).toBe('the body');
@@ -416,7 +446,7 @@ describe('schema v3: body tier plumbing', () => {
   });
 });
 
-describe('schema v3: durability pragmas', () => {
+describe('schema v3: durability pragmas', async () => {
   it('creates new database files with incremental auto-vacuum', async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const { mkdtempSync } = await import('node:fs');
@@ -439,7 +469,7 @@ describe('schema v3: durability pragmas', () => {
   });
 });
 
-describe('schema migration', () => {
+describe('schema migration', async () => {
   it('rebuilds the mirror when the on-disk schema version differs', async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const { mkdtempSync } = await import('node:fs');
@@ -465,9 +495,9 @@ describe('schema migration', () => {
 describe('schema v3: body backfill bookkeeping', () => {
   let store: CacheStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
-    store.putMessages([makeMessage({ uid: 1 }), makeMessage({ uid: 2 })]);
+    await store.putMessages([makeMessage({ uid: 1 }), makeMessage({ uid: 2 })]);
   });
 
   afterEach(() => {
@@ -494,10 +524,10 @@ describe('schema v3: body backfill bookkeeping', () => {
 describe('schema v3: thread discovery', () => {
   let store: CacheStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
     const base = Date.parse('2026-08-01T10:00:00Z');
-    store.putMessages([
+    await store.putMessages([
       makeMessage({ uid: 1, messageId: '<root@x>', internalDate: base }),
       makeMessage({
         uid: 2,
@@ -546,8 +576,8 @@ describe('schema v3: thread discovery', () => {
     expect(store.findThreadMessages('work', 'INBOX', '100', '<root@x>', 2)).toHaveLength(2);
   });
 
-  it('pages full-text results', () => {
-    store.putMessages(
+  it('pages full-text results', async () => {
+    await store.putMessages(
       Array.from({ length: 5 }, (_, i) =>
         makeMessage({
           uid: 100 + i,
@@ -583,9 +613,9 @@ describe('schema v3: attachment index', () => {
     sha256: 'a'.repeat(64),
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
-    store.putMessages([makeMessage({ uid: 1, hasAttachments: true })]);
+    await store.putMessages([makeMessage({ uid: 1, hasAttachments: true })]);
   });
 
   afterEach(() => {
@@ -648,9 +678,9 @@ describe('schema v3: attachment index', () => {
 });
 
 describe('schema v3: integrity check', () => {
-  it('reports a healthy mirror as consistent', () => {
+  it('reports a healthy mirror as consistent', async () => {
     const store = new CacheStore(':memory:');
-    store.putMessages([makeMessage({ uid: 1 })]);
+    await store.putMessages([makeMessage({ uid: 1 })]);
     store.putBody('work', 'INBOX', 1, '100', { text: 'body' });
 
     const result = store.checkIntegrity();
@@ -659,16 +689,16 @@ describe('schema v3: integrity check', () => {
     store.close();
   });
 
-  it('detects a search index that drifted from the message table', () => {
+  it('detects a search index that drifted from the message table', async () => {
     const store = new CacheStore(':memory:');
-    store.putMessages([makeMessage({ uid: 1 })]);
+    await store.putMessages([makeMessage({ uid: 1 })]);
 
     // Drop the insert trigger, then add a message: the FTS index is now
     // missing an entry the content table has — exactly the drift the check
     // exists to catch, and what would happen if a trigger were ever lost.
     const raw = store as unknown as { db: { exec(sql: string): void } };
     raw.db.exec('DROP TRIGGER message_fts_insert');
-    store.putMessages([makeMessage({ uid: 2, messageId: '<b@example.com>' })]);
+    await store.putMessages([makeMessage({ uid: 2, messageId: '<b@example.com>' })]);
 
     const result = store.checkIntegrity();
 
@@ -679,9 +709,9 @@ describe('schema v3: integrity check', () => {
     store.close();
   });
 
-  it('reports a broken search index rather than throwing', () => {
+  it('reports a broken search index rather than throwing', async () => {
     const store = new CacheStore(':memory:');
-    store.putMessages([makeMessage({ uid: 1 })]);
+    await store.putMessages([makeMessage({ uid: 1 })]);
     const raw = store as unknown as { db: { exec(sql: string): void } };
     raw.db.exec('DROP TABLE message_fts');
 
@@ -696,7 +726,7 @@ describe('schema v3: integrity check', () => {
 describe('review fixes: coverage, cascade, watermarks', () => {
   let store: CacheStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new CacheStore(':memory:');
   });
 
@@ -704,15 +734,15 @@ describe('review fixes: coverage, cascade, watermarks', () => {
     store.close();
   });
 
-  it('reports the lowest mirrored uid so the read path can judge coverage', () => {
-    store.putMessages([makeMessage({ uid: 40 }), makeMessage({ uid: 41 })]);
+  it('reports the lowest mirrored uid so the read path can judge coverage', async () => {
+    await store.putMessages([makeMessage({ uid: 40 }), makeMessage({ uid: 41 })]);
 
     expect(store.lowestUid('work', 'INBOX', '100')).toBe(40);
     expect(store.lowestUid('work', 'Archive', '100')).toBeUndefined();
   });
 
-  it('removes attachment rows when their message is expunged', () => {
-    store.putMessages([makeMessage({ uid: 1, hasAttachments: true })]);
+  it('removes attachment rows when their message is expunged', async () => {
+    await store.putMessages([makeMessage({ uid: 1, hasAttachments: true })]);
     store.putAttachment({
       account: 'work',
       mailbox: 'INBOX',
@@ -733,8 +763,8 @@ describe('review fixes: coverage, cascade, watermarks', () => {
     expect(store.countBlobRefs('c'.repeat(64))).toBe(0);
   });
 
-  it('removes attachment rows when old envelopes are evicted', () => {
-    store.putMessages([makeMessage({ uid: 1, internalDate: 1_000, hasAttachments: true })]);
+  it('removes attachment rows when old envelopes are evicted', async () => {
+    await store.putMessages([makeMessage({ uid: 1, internalDate: 1_000, hasAttachments: true })]);
     store.putAttachment({
       account: 'work',
       mailbox: 'INBOX',
@@ -752,7 +782,7 @@ describe('review fixes: coverage, cascade, watermarks', () => {
     expect(store.countBlobRefs('d'.repeat(64))).toBe(0);
   });
 
-  it('forgets the sync watermarks of a mailbox whose envelopes were evicted', () => {
+  it('forgets the sync watermarks of a mailbox whose envelopes were evicted', async () => {
     store.putMailboxState({
       account: 'work',
       mailbox: 'INBOX',
@@ -762,7 +792,7 @@ describe('review fixes: coverage, cascade, watermarks', () => {
       totalMessages: 2,
       lastSyncedAt: Date.now(),
     });
-    store.putMessages([makeMessage({ uid: 1, internalDate: 1_000 })]);
+    await store.putMessages([makeMessage({ uid: 1, internalDate: 1_000 })]);
 
     store.deleteMessagesOlderThan(2_000, 10);
 
@@ -793,8 +823,8 @@ describe('review fixes: coverage, cascade, watermarks', () => {
     expect(state?.totalMessages).toBeUndefined();
   });
 
-  it('does not re-index the search entry when only access time changes', () => {
-    store.putMessages([makeMessage({ uid: 1 })]);
+  it('does not re-index the search entry when only access time changes', async () => {
+    await store.putMessages([makeMessage({ uid: 1 })]);
     store.putBody('work', 'INBOX', 1, '100', { text: 'Nebelkraehe' });
     const before = store.sizeBytes();
 

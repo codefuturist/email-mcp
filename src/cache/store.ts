@@ -28,6 +28,13 @@ export type SyncTier = 'qresync' | 'condstore' | 'baseline';
  */
 export const MAX_CACHED_BODY_BYTES = 256 * 1024;
 
+/**
+ * Rows per `putMessages` transaction. Sized so a single chunk stays well
+ * under any sane probe timeout even on slow storage, while keeping per-chunk
+ * transaction overhead negligible next to the write itself.
+ */
+export const PUT_CHUNK_SIZE = 200;
+
 export type BodySubtype = 'plain' | 'html';
 
 /** A message as handed to the store for persistence. */
@@ -465,8 +472,16 @@ export default class CacheStore {
    * change, say) must not discard a body, headers or preview and force a
    * second download. COALESCE keeps the stored value when the incoming row
    * has none.
+   *
+   * Writes are chunked and the event loop is yielded between chunks.
+   * `node:sqlite` is synchronous, so a single transaction spanning the whole
+   * batch blocks the loop for the entire write. With a cold-start mirror
+   * rebuild that stalls `/healthz` past the liveness probe, and a kill in the
+   * middle of the transaction rolls the whole batch back — the next boot
+   * repeats the same sync, so the container never becomes healthy. Chunking
+   * keeps the loop responsive and preserves partial progress.
    */
-  putMessages(messages: CachedMessageInput[]): void {
+  async putMessages(messages: CachedMessageInput[]): Promise<void> {
     if (messages.length === 0) return;
 
     const stmt = this.prep(`
@@ -500,35 +515,41 @@ export default class CacheStore {
     `);
 
     const now = Date.now();
-    this.transaction(() => {
-      messages.forEach((m) => {
-        const flags = flagColumns(m.flags);
-        stmt.run(
-          m.account,
-          m.mailbox,
-          m.uid,
-          m.uidValidity,
-          m.modseq ?? null,
-          m.emailId ?? null,
-          JSON.stringify(m.envelope),
-          m.bodyStructure ? JSON.stringify(m.bodyStructure) : null,
-          JSON.stringify(m.flags),
-          flags.seen,
-          flags.flagged,
-          flags.answered,
-          m.messageId ?? null,
-          m.inReplyTo ?? null,
-          m.references ? JSON.stringify(m.references) : null,
-          m.internalDate,
-          m.subject ?? null,
-          m.fromText ?? null,
-          m.preview ?? null,
-          m.hasAttachments ? 1 : 0,
-          m.attachmentNames?.length ? m.attachmentNames.join('\n') : null,
-          now,
-        );
+    for (let offset = 0; offset < messages.length; offset += PUT_CHUNK_SIZE) {
+      const chunk = messages.slice(offset, offset + PUT_CHUNK_SIZE);
+      this.transaction(() => {
+        chunk.forEach((m) => {
+          const flags = flagColumns(m.flags);
+          stmt.run(
+            m.account,
+            m.mailbox,
+            m.uid,
+            m.uidValidity,
+            m.modseq ?? null,
+            m.emailId ?? null,
+            JSON.stringify(m.envelope),
+            m.bodyStructure ? JSON.stringify(m.bodyStructure) : null,
+            JSON.stringify(m.flags),
+            flags.seen,
+            flags.flagged,
+            flags.answered,
+            m.messageId ?? null,
+            m.inReplyTo ?? null,
+            m.references ? JSON.stringify(m.references) : null,
+            m.internalDate,
+            m.subject ?? null,
+            m.fromText ?? null,
+            m.preview ?? null,
+            m.hasAttachments ? 1 : 0,
+            m.attachmentNames?.length ? m.attachmentNames.join('\n') : null,
+            now,
+          );
+        });
       });
-    });
+      // Yield to pending I/O, timers and probes before the next chunk. The
+      // final yield is harmless; skipping the branch would only save one tick.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
   }
 
   /** Attach a downloaded body (and its immutable metadata) to a message. */

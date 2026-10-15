@@ -531,7 +531,10 @@ export default class SyncEngine {
     // An empty mailbox is a legitimate answer; so is "nothing changed".
     if (messages.length === 0) return 0;
 
-    this.store.putMessages(messages);
+    // Awaited, not fire-and-forget: putMessages yields between write chunks,
+    // so awaiting it never stalls the loop while still serializing progress
+    // behind this sync's lifecycle.
+    await this.store.putMessages(messages);
     return messages.length;
   }
 

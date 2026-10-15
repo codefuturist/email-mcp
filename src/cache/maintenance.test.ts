@@ -35,10 +35,10 @@ async function setup() {
   return { root, store, blobs };
 }
 
-describe('enforceBudget', () => {
+describe('enforceBudget', async () => {
   it('does nothing while usage is inside the budget', async () => {
     const { store, blobs } = await setup();
-    store.putMessages([makeMessage(1)]);
+    await store.putMessages([makeMessage(1)]);
 
     const result = await enforceBudget(store, blobs, 500);
 
@@ -49,7 +49,7 @@ describe('enforceBudget', () => {
 
   it('evicts least-recently-used attachment blobs first', async () => {
     const { store, blobs } = await setup();
-    store.putMessages([makeMessage(1), makeMessage(2)]);
+    await store.putMessages([makeMessage(1), makeMessage(2)]);
     const cold = await blobs.put(Buffer.alloc(600 * 1024, 1));
     const warm = await blobs.put(Buffer.alloc(600 * 1024, 2));
     store.putAttachment({
@@ -89,7 +89,7 @@ describe('enforceBudget', () => {
 
   it('keeps shared content until its last reference is evicted', async () => {
     const { store, blobs } = await setup();
-    store.putMessages([makeMessage(1), makeMessage(2)]);
+    await store.putMessages([makeMessage(1), makeMessage(2)]);
     const shared = await blobs.put(Buffer.alloc(900 * 1024, 7));
     for (const uid of [1, 2]) {
       store.putAttachment({
@@ -117,7 +117,7 @@ describe('enforceBudget', () => {
   it('drops bodies before envelopes once blobs are gone', async () => {
     const { store, blobs } = await setup();
     const big = 'x'.repeat(100 * 1024);
-    store.putMessages([makeMessage(1), makeMessage(2), makeMessage(3), makeMessage(4)]);
+    await store.putMessages([makeMessage(1), makeMessage(2), makeMessage(3), makeMessage(4)]);
     for (const uid of [1, 2, 3, 4]) {
       store.putBody('work', 'INBOX', uid, '100', { text: big });
     }
@@ -143,7 +143,7 @@ describe('enforceBudget', () => {
 
   it('keeps the full-text index consistent with evicted bodies', async () => {
     const { store, blobs } = await setup();
-    store.putMessages([makeMessage(1), makeMessage(2)]);
+    await store.putMessages([makeMessage(1), makeMessage(2)]);
     store.putBody('work', 'INBOX', 1, '100', { text: `Nebelkraehe ${'x'.repeat(200 * 1024)}` });
     store.putBody('work', 'INBOX', 2, '100', { text: `Nebelkraehe ${'y'.repeat(200 * 1024)}` });
     expect(store.searchMessages('work', 'INBOX', '100', 'Nebelkraehe')).toHaveLength(2);
@@ -158,12 +158,12 @@ describe('enforceBudget', () => {
   });
 });
 
-describe('collectOrphans', () => {
+describe('collectOrphans', async () => {
   it('removes blobs the index no longer references', async () => {
     const { store, blobs } = await setup();
     const orphan = await blobs.put(Buffer.from('orphaned'));
     const referenced = await blobs.put(Buffer.from('referenced'));
-    store.putMessages([makeMessage(1)]);
+    await store.putMessages([makeMessage(1)]);
     store.putAttachment({
       account: 'work',
       mailbox: 'INBOX',
@@ -186,7 +186,7 @@ describe('collectOrphans', () => {
 
   it('drops index rows whose content has vanished', async () => {
     const { store, blobs } = await setup();
-    store.putMessages([makeMessage(1)]);
+    await store.putMessages([makeMessage(1)]);
     store.putAttachment({
       account: 'work',
       mailbox: 'INBOX',
@@ -206,10 +206,10 @@ describe('collectOrphans', () => {
   });
 });
 
-describe('review fixes: maintenance', () => {
+describe('review fixes: maintenance', async () => {
   it('measures usage from the index, not by walking the blob directory', async () => {
     const { store, blobs } = await setup();
-    store.putMessages([makeMessage(1)]);
+    await store.putMessages([makeMessage(1)]);
     const { sha256, size } = await blobs.put(Buffer.alloc(300 * 1024, 3));
     store.putAttachment({
       account: 'work',
@@ -236,7 +236,7 @@ describe('review fixes: maintenance', () => {
 
   it('reclaims blobs whose messages were expunged', async () => {
     const { store, blobs } = await setup();
-    store.putMessages([makeMessage(1)]);
+    await store.putMessages([makeMessage(1)]);
     const { sha256, size } = await blobs.put(Buffer.from('attached bytes'));
     store.putAttachment({
       account: 'work',
