@@ -18,6 +18,34 @@ import { AppConfigFileSchema } from './schema.js';
 import { resolveSecret } from './secret-resolver.js';
 import { CONFIG_FILE, xdg } from './xdg.js';
 
+/**
+ * Parse `MCP_EMAIL_ALERT_WEBHOOK_HEADERS`: a JSON object of header name → value,
+ * e.g. `{"Authorization":"Bearer <token>"}`. Unset/blank means no extra headers.
+ * Malformed input throws instead of silently sending the webhook unauthenticated.
+ */
+export function parseWebhookHeaders(value: string | undefined): Record<string, string> | undefined {
+  if (!value?.trim()) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(
+      'MCP_EMAIL_ALERT_WEBHOOK_HEADERS must be a JSON object of header names to values',
+    );
+  }
+  const isStringMap =
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    !Array.isArray(parsed) &&
+    Object.values(parsed).every((v) => typeof v === 'string');
+  if (!isStringMap) {
+    throw new Error(
+      'MCP_EMAIL_ALERT_WEBHOOK_HEADERS must be a JSON object of header names to values',
+    );
+  }
+  return parsed as Record<string, string>;
+}
+
 // ---------------------------------------------------------------------------
 // Environment variable loader (single-account quick setup)
 // ---------------------------------------------------------------------------
@@ -158,6 +186,7 @@ function loadFromEnv(): RawAppConfig | null {
               | 'normal'
               | 'low') ?? 'high',
           webhook_url: process.env.MCP_EMAIL_ALERT_WEBHOOK_URL ?? '',
+          webhook_headers: parseWebhookHeaders(process.env.MCP_EMAIL_ALERT_WEBHOOK_HEADERS),
           webhook_events: ['urgent', 'high'],
         },
         auto_calendar: process.env.MCP_EMAIL_HOOK_AUTO_CALENDAR === 'true',
@@ -394,6 +423,7 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
           sound: raw.settings.hooks.alerts?.sound ?? false,
           urgencyThreshold: raw.settings.hooks.alerts?.urgency_threshold ?? 'high',
           webhookUrl: raw.settings.hooks.alerts?.webhook_url ?? '',
+          webhookHeaders: raw.settings.hooks.alerts?.webhook_headers,
           webhookEvents: raw.settings.hooks.alerts?.webhook_events ?? ['urgent', 'high'],
         },
         autoCalendar: raw.settings.hooks.auto_calendar ?? false,
@@ -674,6 +704,7 @@ read_only = false  # set to true to disable the mailbox-write tools
 # sound = false           # play sound for urgent emails
 # urgency_threshold = "high" # minimum priority: "urgent" | "high" | "normal" | "low"
 # webhook_url = ""        # HTTP POST to Slack/Discord/ntfy.sh/etc.
+# webhook_headers = { Authorization = "Bearer <token>" }  # extra headers for the POST
 # webhook_events = ["urgent", "high"]  # which priorities trigger webhook
 
 [[accounts]]

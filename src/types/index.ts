@@ -126,6 +126,8 @@ export interface AlertsConfig {
   sound: boolean;
   urgencyThreshold: 'urgent' | 'high' | 'normal' | 'low';
   webhookUrl: string;
+  /** Extra headers sent with the webhook POST (e.g. Authorization). Never logged or displayed. */
+  webhookHeaders?: Record<string, string>;
   webhookEvents: ('urgent' | 'high' | 'normal' | 'low')[];
 }
 

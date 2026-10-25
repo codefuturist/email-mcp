@@ -102,6 +102,8 @@ export const AlertsConfigSchema = z.object({
   sound: z.boolean().default(false),
   urgency_threshold: z.enum(['urgent', 'high', 'normal', 'low']).default('high'),
   webhook_url: z.string().default(''),
+  /** Extra HTTP headers for the webhook POST, e.g. `{ Authorization = "Bearer …" }`. */
+  webhook_headers: z.record(z.string(), z.string()).optional(),
   webhook_events: z
     .array(z.enum(['urgent', 'high', 'normal', 'low']))
     .default((): ('urgent' | 'high' | 'normal' | 'low')[] => ['urgent', 'high']),

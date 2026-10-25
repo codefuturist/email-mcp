@@ -75,7 +75,9 @@ describe('SETTINGS_SECTIONS drift guards', () => {
     ['scheduler', SchedulerConfigSchema.shape, []],
     ['cache', CacheConfigSchema.shape, []],
     ['hooks', HooksConfigSchema.shape, ['rules', 'alerts']],
-    ['alerts', AlertsConfigSchema.shape, []],
+    // webhook_headers holds credentials (Authorization) and is a key/value map the
+    // prompt kinds can't edit — it is set in the TOML file or via env only.
+    ['alerts', AlertsConfigSchema.shape, ['webhook_headers']],
     ['server', ServerConfigSchema.shape, []],
   ];
 

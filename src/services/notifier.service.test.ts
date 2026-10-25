@@ -116,6 +116,30 @@ describe('NotifierService webhook dispatch', () => {
     );
   });
 
+  it('sends configured webhook headers and keeps Content-Type JSON', async () => {
+    notifier.stop();
+    notifier = new NotifierService(
+      buildAlertsConfig({
+        webhookUrl: 'https://hooks.example.com/wh',
+        webhookHeaders: { Authorization: 'Bearer t0ken', 'Content-Type': 'text/plain' },
+      }),
+    );
+    await notifier.alert({
+      account: 'test',
+      sender: { address: 'a@b.c' },
+      subject: 'hi',
+      priority: 'high',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://hooks.example.com/wh',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer t0ken', 'Content-Type': 'application/json' },
+      }),
+    );
+  });
+
   // Without these, a webhook consumer has no way to act on the message
   // (fetch it, check its attachments) — just a sender and a subject line.
   it('carries uid, folder and hasAttachments in the webhook body', async () => {

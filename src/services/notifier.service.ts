@@ -426,7 +426,7 @@ export default class NotifierService {
     try {
       const resp = await fetch(this.config.webhookUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...this.config.webhookHeaders, 'Content-Type': 'application/json' },
         body,
         signal: controller.signal,
         // A compromised or misconfigured endpoint could 302 this request to

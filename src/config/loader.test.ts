@@ -7,6 +7,7 @@ import {
   generateTemplate,
   loadConfig,
   loadRawConfig,
+  parseWebhookHeaders,
   saveConfig,
   saveConfigValidated,
   writeConfigTemplate,
@@ -628,5 +629,50 @@ host = "smtp.example.com"
     await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
     const config = await loadConfig(configPath);
     expect(config.accounts[0]!.password).toBe('secret');
+  });
+});
+
+describe('alert webhook headers', () => {
+  let tmpDir: string;
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webhook-hdr-'));
+  });
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('maps [settings.hooks.alerts] webhook_headers to webhookHeaders', async () => {
+    const configPath = path.join(tmpDir, 'config.toml');
+    await fs.writeFile(
+      configPath,
+      `${MINIMAL_TOML}\n[settings.hooks.alerts]\nwebhook_url = "https://hooks.example.com/wh"\nwebhook_headers = { Authorization = "Bearer t0ken" }\n`,
+      'utf-8',
+    );
+    const config = await loadConfig(configPath);
+    expect(config.settings.hooks.alerts.webhookHeaders).toEqual({ Authorization: 'Bearer t0ken' });
+  });
+
+  it('leaves webhookHeaders undefined when not configured', async () => {
+    const configPath = path.join(tmpDir, 'config.toml');
+    await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+    const config = await loadConfig(configPath);
+    expect(config.settings.hooks.alerts.webhookHeaders).toBeUndefined();
+  });
+});
+
+describe('parseWebhookHeaders', () => {
+  it('returns undefined for unset or blank input', () => {
+    expect(parseWebhookHeaders(undefined)).toBeUndefined();
+    expect(parseWebhookHeaders('  ')).toBeUndefined();
+  });
+
+  it('parses a JSON object of string values', () => {
+    expect(parseWebhookHeaders('{"Authorization":"Bearer x"}')).toEqual({
+      Authorization: 'Bearer x',
+    });
+  });
+
+  it.each(['not json', '[]', '"str"', 'null', '{"a":1}'])('rejects %s', (bad) => {
+    expect(() => parseWebhookHeaders(bad)).toThrow('MCP_EMAIL_ALERT_WEBHOOK_HEADERS');
   });
 });

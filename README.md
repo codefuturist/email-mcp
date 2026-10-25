@@ -963,8 +963,14 @@ desktop = true              # OS-level notifications (macOS/Linux/Windows)
 sound = true                # play sound for urgent emails
 urgency_threshold = "high"  # minimum priority to trigger desktop alert
 webhook_url = "https://ntfy.sh/my-email-alerts"  # optional: Slack, Discord, ntfy.sh, etc.
+webhook_headers = { Authorization = "Bearer <token>" }  # optional: extra headers (auth) for the POST
 webhook_events = ["urgent", "high"]
 ```
+
+`webhook_headers` is for endpoints that require authentication. Env-only setups can use
+`MCP_EMAIL_ALERT_WEBHOOK_HEADERS='{"Authorization":"Bearer <token>"}'` (a JSON object of strings;
+malformed JSON fails at startup instead of sending the webhook unauthenticated). Header values are
+never logged or shown by the watcher tools, and `Content-Type: application/json` is always sent.
 
 **Supported platforms:** macOS (Notification Center via `osascript`), Linux (`notify-send`), Windows (PowerShell toast). Zero npm dependencies — uses native OS commands.
 
