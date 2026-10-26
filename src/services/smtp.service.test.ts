@@ -148,6 +148,96 @@ describe('SmtpService', () => {
   });
 
   describe('sendDraft', () => {
+    function setupDraft() {
+      const imap = {
+        fetchDraft: vi.fn().mockResolvedValue({
+          email: {
+            to: [{ address: 'a@b.c' }],
+            bcc: [{ address: 'hidden@b.c' }],
+            subject: 'Draft',
+            bodyHtml: '<img src="cid:logo">',
+            attachments: [
+              { filename: 'same.png', partId: '2', contentId: 'logo', inline: true },
+              { filename: 'same.png', partId: '3', inline: false },
+            ],
+          },
+          mailbox: 'Custom Drafts',
+        }),
+        downloadAttachment: vi.fn().mockResolvedValue({
+          filename: 'same.png',
+          mimeType: 'image/png',
+          contentBase64: 'YWJj',
+        }),
+        deleteDraft: vi.fn().mockResolvedValue(undefined),
+      };
+      service = new SmtpService(connections, rateLimiter, imap as unknown as ImapService);
+      return imap;
+    }
+
+    it('preserves BCC, duplicate-named attachments and inline CIDs before removing the draft', async () => {
+      const imap = setupDraft();
+      const result = await service.sendDraft('test', 7);
+      expect(transport.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bcc: 'hidden@b.c',
+          attachments: [
+            expect.objectContaining({
+              content: Buffer.from('abc'),
+              cid: 'logo',
+              contentDisposition: 'inline',
+            }),
+            expect.objectContaining({
+              content: Buffer.from('abc'),
+              contentDisposition: 'attachment',
+            }),
+          ],
+        }),
+      );
+      expect(imap.downloadAttachment).toHaveBeenNthCalledWith(
+        1,
+        'test',
+        '7',
+        'Custom Drafts',
+        { partId: '2' },
+        25 * 1024 * 1024,
+      );
+      expect(imap.downloadAttachment).toHaveBeenNthCalledWith(
+        2,
+        'test',
+        '7',
+        'Custom Drafts',
+        { partId: '3' },
+        25 * 1024 * 1024 - 3,
+      );
+      expect(result.draftCleanup).toEqual({ kind: 'removed' });
+      expect(imap.deleteDraft).toHaveBeenCalledWith('test', 7, 'Custom Drafts');
+    });
+
+    it('does not send or delete a draft when a part cannot be downloaded', async () => {
+      const imap = setupDraft();
+      imap.downloadAttachment.mockRejectedValue(new Error('part exceeds limit'));
+      await expect(service.sendDraft('test', 7)).rejects.toThrow('part exceeds limit');
+      expect(transport.sendMail).not.toHaveBeenCalled();
+      expect(imap.deleteDraft).not.toHaveBeenCalled();
+    });
+
+    it('reports SMTP success separately from cleanup failure', async () => {
+      const imap = setupDraft();
+      imap.deleteDraft.mockRejectedValue(new Error('IMAP unavailable'));
+      await expect(service.sendDraft('test', 7)).resolves.toMatchObject({
+        status: 'sent',
+        draftCleanup: { kind: 'failed', error: 'IMAP unavailable' },
+      });
+      expect(transport.sendMail).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the original draft when SMTP fails', async () => {
+      const imap = setupDraft();
+      transport.sendMail.mockRejectedValue(new Error('SMTP unavailable'));
+      await expect(service.sendDraft('test', 7)).rejects.toThrow('SMTP unavailable');
+      expect(imap.deleteDraft).not.toHaveBeenCalled();
+    });
+
     it('sends both parts for an HTML draft', async () => {
       const imap = {
         fetchDraft: vi.fn().mockResolvedValue({

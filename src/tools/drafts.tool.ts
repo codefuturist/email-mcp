@@ -121,9 +121,11 @@ export default function registerDraftTools(
             {
               type: 'text' as const,
               text: `✅ Draft sent (Message-ID: ${result.messageId}). ${
-                result.sentCopy?.kind === 'failed'
-                  ? 'Draft kept (the Sent-copy APPEND failed).'
-                  : 'Draft removed from folder.'
+                result.draftCleanup?.kind === 'failed'
+                  ? `Draft cleanup failed: ${result.draftCleanup.error}. The message was sent; do not resend.`
+                  : result.sentCopy?.kind === 'failed'
+                    ? 'Draft kept (the Sent-copy APPEND failed).'
+                    : 'Draft removed from folder.'
               }${sentCopyNote(result.sentCopy)}`,
             },
           ],

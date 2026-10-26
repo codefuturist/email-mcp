@@ -336,6 +336,7 @@ export interface SendResult {
   messageId: string;
   status: 'sent' | 'failed';
   sentCopy?: SentCopyResult;
+  draftCleanup?: { kind: 'removed' | 'kept' } | { kind: 'failed'; error: string };
 }
 
 export interface PaginatedResult<T> {

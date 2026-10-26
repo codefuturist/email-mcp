@@ -407,11 +407,38 @@ export default class SmtpService {
 
     const to = draft.to.map((a) => a.address).join(', ');
     const cc = draft.cc?.map((a) => a.address).join(', ');
+    const bcc = draft.bcc?.map((a) => a.address).join(', ');
+    // Resolve every part before SMTP: never send a silently incomplete draft.
+    // Bound the aggregate as well as each part to avoid retaining an unbounded
+    // number of buffers while composing the message.
+    const attachments = [];
+    let remainingBytes = FORWARD_ATTACHMENT_MAX_BYTES;
+    for (const meta of draft.attachments ?? []) {
+      const part = await this.imapService.downloadAttachment(
+        accountName,
+        String(draftId),
+        draftsPath,
+        meta.partId !== undefined ? { partId: meta.partId } : meta.filename,
+        remainingBytes,
+      );
+      const content = Buffer.from(part.contentBase64, 'base64');
+      remainingBytes -= content.length;
+      if (remainingBytes < 0) throw new Error('Draft attachments exceed the 25 MB limit');
+      attachments.push({
+        filename: part.filename,
+        content,
+        contentType: part.mimeType,
+        ...(meta.contentId ? { cid: meta.contentId } : {}),
+        contentDisposition: meta.inline ? ('inline' as const) : ('attachment' as const),
+      });
+    }
 
     const mail = {
       from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
       to,
       cc,
+      bcc,
+      ...(attachments.length ? { attachments } : {}),
       subject: draft.subject,
       inReplyTo: draft.inReplyTo,
       references: draft.references?.join(' '),
@@ -427,14 +454,23 @@ export default class SmtpService {
     // failed. The copy would otherwise disappear entirely: the draft gone,
     // and no replacement filed to take its place. A copy that was skipped on
     // purpose (saveToSent off, or Gmail already filing it) is not this case.
+    let draftCleanup: SendResult['draftCleanup'] = { kind: 'kept' };
     if (sentCopy.kind !== 'failed') {
-      await this.imapService.deleteDraft(accountName, draftId, draftsPath);
+      try {
+        await this.imapService.deleteDraft(accountName, draftId, draftsPath);
+        draftCleanup = { kind: 'removed' };
+      } catch (err) {
+        // SMTP already accepted the message. Reporting a failed send invites
+        // a retry that delivers a duplicate.
+        draftCleanup = { kind: 'failed', error: err instanceof Error ? err.message : String(err) };
+      }
     }
 
     return {
       messageId: result.messageId ?? '',
       status: 'sent',
       sentCopy,
+      draftCleanup,
     };
   }
 }
