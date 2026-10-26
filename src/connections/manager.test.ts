@@ -76,6 +76,43 @@ describe('ConnectionManager', () => {
     expect(eventBus.emit).not.toHaveBeenCalledWith('imap:reconnect', expect.anything());
   });
 
+  it('shares one in-flight IMAP connection across concurrent callers', async () => {
+    const manager = new ConnectionManager([account]);
+    const clients = await Promise.all(
+      Array.from({ length: 8 }, () => manager.getImapClient('work')),
+    );
+    expect(instances).toHaveLength(1);
+    expect(clients.every((client) => client === clients[0])).toBe(true);
+  });
+
+  it('clears a failed in-flight attempt so a later caller can retry', async () => {
+    mockState.secureConnection = false;
+    const manager = new ConnectionManager([
+      { ...account, imap: { ...account.imap, tls: false, starttls: true } },
+    ]);
+    const results = await Promise.allSettled([
+      manager.getImapClient('work'),
+      manager.getImapClient('work'),
+    ]);
+    expect(results.every((result) => result.status === 'rejected')).toBe(true);
+    expect(instances).toHaveLength(1);
+    mockState.secureConnection = true;
+    await expect(manager.getImapClient('work')).resolves.toBeDefined();
+    expect(instances).toHaveLength(2);
+  });
+
+  it('does not leave a connection alive when shutdown races with connect', async () => {
+    const manager = new ConnectionManager([account]);
+    const attempt = manager.getImapClient('work');
+    const rejected = expect(attempt).rejects.toThrow('closing');
+    await manager.closeAll();
+    await rejected;
+    await expect(manager.getImapClient('work')).rejects.toThrow('closing');
+    expect(
+      (instances[0] as unknown as { close: ReturnType<typeof vi.fn> }).close,
+    ).toHaveBeenCalled();
+  });
+
   it('announces a reconnect when it replaces a dead connection', async () => {
     const manager = new ConnectionManager([account]);
 
