@@ -160,6 +160,37 @@ describe('ImapService', () => {
   // -----------------------------------------------------------------------
 
   describe('listEmails', () => {
+    it('fetches only the requested sequence window in an unfiltered large mailbox', async () => {
+      Object.assign(client, { mailbox: { exists: 100000 } });
+      client.fetch.mockReturnValueOnce(
+        (async function* () {
+          yield { uid: 99991 };
+          yield { uid: 99992 };
+        })(),
+      );
+      const result = await service.listEmails('test', { page: 50000, pageSize: 2 });
+      expect(client.search).not.toHaveBeenCalled();
+      expect(client.fetch).toHaveBeenNthCalledWith(1, '1:2', { uid: true });
+      expect(client.fetch.mock.calls[1]?.[0]).toBe('99992,99991');
+      expect(result).toMatchObject({ total: 100000, page: 50000, hasMore: false });
+    });
+
+    it.each([0, 5])(
+      'does not fetch a reversed range for an empty or past-end page (%i)',
+      async (exists) => {
+        Object.assign(client, { mailbox: { exists } });
+        const result = await service.listEmails('test', { page: 2, pageSize: 20 });
+        expect(client.fetch).not.toHaveBeenCalled();
+        expect(client.search).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ items: [], total: exists, hasMore: false });
+      },
+    );
+
+    it('retains server-side filtering when a mailbox snapshot is available', async () => {
+      Object.assign(client, { mailbox: { exists: 100000 } });
+      await service.listEmails('test', { seen: false });
+      expect(client.search).toHaveBeenCalledWith({ seen: false }, { uid: true });
+    });
     function fetchYielding(...messages: Record<string, unknown>[]) {
       return () =>
         (async function* gen() {
@@ -1262,6 +1293,55 @@ describe('ImapService', () => {
   // -----------------------------------------------------------------------
 
   describe('downloadAttachment', () => {
+    it.each([undefined, 'base64'])(
+      'rejects actual oversized bytes despite a small BODYSTRUCTURE size (%s)',
+      async (encoding) => {
+        client.fetchOne.mockResolvedValue({
+          uid: 42,
+          bodyStructure: {
+            type: 'application/pdf',
+            disposition: 'attachment',
+            dispositionParameters: { filename: 'file.pdf' },
+            size: 1,
+            encoding,
+          },
+        });
+        let drained = false;
+        client.download.mockResolvedValue({
+          meta: { encoding },
+          content: (async function* () {
+            yield Buffer.alloc(5, 255);
+            yield Buffer.alloc(5, 255);
+            drained = true;
+          })(),
+        });
+        await expect(
+          service.downloadAttachment('test', '42', 'INBOX', 'file.pdf', 4),
+        ).rejects.toThrow(/exceeds/);
+        expect(drained).toBe(true);
+        expect(client._releaseFn).toHaveBeenCalled();
+      },
+    );
+
+    it('allows base64 expansion at the decoded limit and rejects decoded overflow', async () => {
+      client.fetchOne.mockResolvedValue({
+        uid: 42,
+        bodyStructure: {
+          type: 'application/pdf',
+          disposition: 'attachment',
+          dispositionParameters: { filename: 'file.pdf' },
+          size: 1,
+          encoding: 'base64',
+        },
+      });
+      client.download.mockResolvedValueOnce(downloadYielding('YWJjZA=='));
+      const result = await service.downloadAttachment('test', '42', 'INBOX', 'file.pdf', 4);
+      expect(result.size).toBe(4);
+      client.download.mockResolvedValueOnce(downloadYielding('YWJjZGU='));
+      await expect(
+        service.downloadAttachment('test', '42', 'INBOX', 'file.pdf', 4),
+      ).rejects.toThrow(/exceeds/);
+    });
     it('downloads a specific duplicate-named attachment by part id', async () => {
       const invoice = {
         type: 'application/pdf',
