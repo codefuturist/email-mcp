@@ -47,6 +47,8 @@ async function assertImapUpgraded(client: ImapFlow, account: AccountConfig): Pro
 
 export default class ConnectionManager implements IConnectionManager {
   private imapClients = new Map<string, ImapFlow>();
+  private imapPending = new Map<string, Promise<ImapFlow>>();
+  private closing = false;
 
   private smtpTransports = new Map<string, Transporter>();
 
@@ -117,6 +119,19 @@ export default class ConnectionManager implements IConnectionManager {
   }
 
   async getImapClient(accountName: string): Promise<ImapFlow> {
+    if (this.closing) throw new Error('Connection manager is closing');
+    const pending = this.imapPending.get(accountName);
+    if (pending) return pending;
+    const operation = this.connectImap(accountName);
+    this.imapPending.set(accountName, operation);
+    try {
+      return await operation;
+    } finally {
+      this.imapPending.delete(accountName);
+    }
+  }
+
+  private async connectImap(accountName: string): Promise<ImapFlow> {
     const existing = this.imapClients.get(accountName);
     if (existing?.usable) {
       return existing;
@@ -160,8 +175,18 @@ export default class ConnectionManager implements IConnectionManager {
     });
 
     this.registerImapLifecycle(accountName, client);
-    await withAuthGuidance(account, 'IMAP', () => client.connect());
-    await assertImapUpgraded(client, account);
+    try {
+      await withAuthGuidance(account, 'IMAP', () => client.connect());
+      await assertImapUpgraded(client, account);
+      if (this.closing) throw new Error('Connection manager is closing');
+    } catch (err) {
+      try {
+        client.close();
+      } catch {
+        // Preserve the connection/authentication error.
+      }
+      throw err;
+    }
     await mcpLog(
       'info',
       'imap',
@@ -381,6 +406,8 @@ export default class ConnectionManager implements IConnectionManager {
   // -------------------------------------------------------------------------
 
   async closeAll(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled(this.imapPending.values());
     await mcpLog('info', 'connections', 'Closing all connections');
     const closeOps: Promise<void>[] = [];
 

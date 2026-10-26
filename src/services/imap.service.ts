@@ -632,9 +632,29 @@ export default class ImapService {
       if (options.flagged !== undefined) search.flagged = options.flagged;
       if (options.answered !== undefined) search.answered = options.answered;
 
-      // Search for matching UIDs
-      const searchResult = await client.search(search, { uid: true });
-      let uids: number[] = Array.isArray(searchResult) ? searchResult : [];
+      // Unfiltered listings need only the requested sequence window, not a
+      // SEARCH ALL response containing every UID in a large mailbox. Capture
+      // UIDs first so subsequent fetches still use stable identifiers.
+      let pageTotal: number | undefined;
+      let uids: number[] = [];
+      if (
+        Object.keys(search).length === 0 &&
+        options.hasAttachment === undefined &&
+        client.mailbox
+      ) {
+        pageTotal = client.mailbox.exists;
+        const end = pageTotal - (page - 1) * pageSize;
+        if (end > 0) {
+          for await (const msg of client.fetch(`${Math.max(1, end - pageSize + 1)}:${end}`, {
+            uid: true,
+          })) {
+            uids.push(msg.uid);
+          }
+        }
+      } else {
+        const searchResult = await client.search(search, { uid: true });
+        uids = Array.isArray(searchResult) ? searchResult : [];
+      }
 
       // Post-filter for hasAttachment (IMAP has no native attachment search)
       if (options.hasAttachment !== undefined && uids.length > 0) {
@@ -656,7 +676,7 @@ export default class ImapService {
       if (uids.length === 0) {
         return {
           items: [],
-          total: 0,
+          total: pageTotal ?? 0,
           page,
           pageSize,
           hasMore: false,
@@ -665,8 +685,8 @@ export default class ImapService {
 
       // Sort descending (newest first) and paginate
       uids.sort((a, b) => b - a);
-      const total = uids.length;
-      const start = (page - 1) * pageSize;
+      const total = pageTotal ?? uids.length;
+      const start = pageTotal === undefined ? (page - 1) * pageSize : 0;
       const pageUids = uids.slice(start, start + pageSize);
 
       if (pageUids.length === 0) {
@@ -719,7 +739,7 @@ export default class ImapService {
         total,
         page,
         pageSize,
-        hasMore: start + pageSize < total,
+        hasMore: page * pageSize < total,
       };
     } finally {
       lock.release();
@@ -1885,11 +1905,31 @@ export default class ImapService {
         throw new Error(`Failed to download attachment "${attachment.filename}"`);
       }
 
+      const downloadMeta = downloadResult.meta as Record<string, unknown> | undefined;
+      const mayNeedBase64Decode =
+        attachment.encoding === 'base64' && downloadMeta?.encoding === undefined;
+      // Allow RFC 2045 base64 expansion (including line breaks) until we can
+      // disambiguate raw base64 from an already-decoded BINARY response.
+      const transferLimit = mayNeedBase64Decode
+        ? (4 * Math.ceil(maxSizeBytes / 3) * 78) / 76 + 4
+        : maxSizeBytes;
       const chunks: Buffer[] = [];
-      // eslint-disable-next-line no-restricted-syntax
+      let received = 0;
+      let exceeded = false;
+      // Drain an oversized part without retaining it. Aborting an ImapFlow
+      // download mid-command can leave the shared connection desynchronized.
       for await (const chunk of downloadResult.content) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        received += buffer.length;
+        if (received > transferLimit) {
+          exceeded = true;
+          chunks.length = 0;
+        } else if (!exceeded) {
+          chunks.push(buffer);
+        }
       }
+      if (exceeded)
+        throw new Error(`Attachment "${attachment.filename}" exceeds ${maxSizeBytes} byte limit`);
       let content = Buffer.concat(chunks);
 
       // Some servers (GreenMail among them) answer the n.MIME section of a
@@ -1897,7 +1937,6 @@ export default class ImapService {
       // the raw base64 through undecoded. Its meta.encoding mirrors what it
       // decoded with, so its absence next to a BODYSTRUCTURE-declared base64
       // means the decode never ran — apply it here.
-      const downloadMeta = downloadResult.meta as Record<string, unknown> | undefined;
       if (attachment.encoding === 'base64' && downloadMeta?.encoding === undefined) {
         // Only when the bytes really do look like base64 text. A server that
         // withholds the MIME section *and* serves the part via FETCH BINARY
@@ -1907,6 +1946,10 @@ export default class ImapService {
         if (/^[A-Za-z0-9+/\s]*={0,2}\s*$/.test(asText)) {
           content = Buffer.from(asText, 'base64');
         }
+      }
+
+      if (content.length > maxSizeBytes) {
+        throw new Error(`Attachment "${attachment.filename}" exceeds ${maxSizeBytes} byte limit`);
       }
 
       return {

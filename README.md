@@ -1214,6 +1214,22 @@ report the outcome in their result's `sentCopy` field: `{kind: "filed", path}`,
 `{kind: "skipped"}` (setting off, or Gmail's own capture), or
 `{kind: "failed", error}`.
 
+`send_draft` preserves Bcc recipients and downloads the draft's attachments,
+including inline images, before sending. Attachments have a combined 25 MiB
+decoded-size limit; a missing or oversized part prevents sending and leaves
+the original draft intact. After SMTP accepts the message, a failure to remove
+the draft is reported as delivery success with `draftCleanup: {kind: "failed",
+error}`, not a failed send. Do not resend it: check and remove the leftover
+draft separately. Successful cleanup returns `{kind: "removed"}`; retaining
+the draft after a failed Sent-copy APPEND returns `{kind: "kept"}`.
+
+Unfiltered live `list_emails` requests fetch only the requested page's UIDs.
+Filtered listings and searches still retrieve matching UIDs to preserve exact
+totals and filter semantics. Attachment downloads check actual received and
+decoded sizes as well as server-declared sizes. Oversized streams are drained
+without retaining their payload to keep the shared IMAP connection usable;
+this bounds buffered data, not transfer bandwidth.
+
 Outbound HTML (`html: true`) is sent as `multipart/alternative` with a
 generated plain-text alternative. Forwards quote the original as converted
 text; pass `html: true` to `forward_email` to also carry the original HTML.
