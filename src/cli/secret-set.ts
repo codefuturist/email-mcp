@@ -32,24 +32,89 @@ export function parseSetSecretArgs(args: string[]): SetSecretOptions {
   return opts;
 }
 
-/**
- * Read all of stdin as the secret, stripping exactly one trailing newline
- * (LF or CRLF) — the `docker login --password-stdin` convention — so
- * `echo pw |` and `printf pw |` store the same value, while a secret that
- * genuinely ends in a newline can still be fed by supplying two.
- */
-export async function readSecretFromStdin(stream: Readable): Promise<string> {
+async function readAll(stream: Readable): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
     chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : (chunk as Buffer));
   }
-  let secret = Buffer.concat(chunks).toString('utf-8');
-  if (secret.endsWith('\r\n')) secret = secret.slice(0, -2);
-  else if (secret.endsWith('\n')) secret = secret.slice(0, -1);
-  if (secret.length === 0) {
-    throw new Error('Refusing to store an empty secret: nothing was read from standard input.');
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+export interface ParsedSecret {
+  secret: string;
+  /** The input was a pasted multi-line block and only its Password field was taken. */
+  extractedFromBlock: boolean;
+}
+
+/**
+ * One line = the secret, with exactly one trailing newline stripped (LF,
+ * CR or CRLF) — the `docker login --password-stdin` convention, so
+ * `echo pw |` and `printf pw |` store the same value.
+ *
+ * Several lines = a pasted block. Proton Bridge's "Mailbox details" panel
+ * copies hostname, port, username, password and security as one block,
+ * twice (IMAP, SMTP), and that is exactly what `pbpaste |` delivers; the
+ * first time it happened, 186 characters of panel text went into the
+ * keychain as the password. So: take the value after a `Password` label,
+ * accept the same value repeated, refuse differing values, and refuse any
+ * other multi-line input rather than store it verbatim.
+ */
+export function parseSecretInput(raw: string): ParsedSecret {
+  let text = raw;
+  if (text.endsWith('\r\n')) text = text.slice(0, -2);
+  else if (text.endsWith('\n') || text.endsWith('\r')) text = text.slice(0, -1);
+
+  // Copying the one-liner to paste it into the terminal replaces the
+  // password on the clipboard; `pbpaste |` then feeds the command to itself.
+  // 186 characters of shell went into a keychain that way once.
+  if (/\bset-secret\b|\bpbpaste\s*\|/.test(text)) {
+    throw new Error(
+      'The piped text is the set-secret command line itself — the clipboard still held the ' +
+        'command, not the password. Paste the command first, THEN copy the password, then press Enter ' +
+        '(pbpaste reads the clipboard when the command runs).',
+    );
   }
-  return secret;
+
+  const lines = text.split(/\r\n|\r|\n/).map((line) => line.trim());
+  if (lines.length === 1) {
+    if (text.trim().length === 0) {
+      throw new Error('Refusing to store an empty secret: nothing was read from standard input.');
+    }
+    return { secret: text, extractedFromBlock: false };
+  }
+
+  const values: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const inline = /^password:?\s+(\S+)$/i.exec(line);
+    if (inline?.[1]) {
+      values.push(inline[1]);
+      continue;
+    }
+    if (/^password:?$/i.test(line)) {
+      const next = lines.slice(i + 1).find((candidate) => candidate.length > 0);
+      if (next !== undefined) values.push(next);
+    }
+  }
+
+  if (values.length === 0) {
+    const nonEmpty = lines.filter((line) => line.length > 0).length;
+    throw new Error(
+      `Expected the secret alone on one line, but standard input had ${nonEmpty} lines. ` +
+        'Pipe only the password (e.g. pbpaste | … after copying just the password).',
+    );
+  }
+  if (new Set(values).size > 1) {
+    throw new Error(
+      'The pasted block has Password fields that differ (IMAP vs SMTP?) — pipe the one you mean on its own.',
+    );
+  }
+  return { secret: values[0] as string, extractedFromBlock: true };
+}
+
+/** Read all of stdin and interpret it as a secret (see parseSecretInput). */
+export async function readSecretFromStdin(stream: Readable): Promise<string> {
+  return parseSecretInput(await readAll(stream)).secret;
 }
 
 /** The two keychain operations this flow needs, injectable for tests. */
@@ -75,8 +140,8 @@ export async function setSecretFromStdin(
   stdin: Readable,
   configPath = CONFIG_FILE,
   keychain: KeychainBackend = realKeychain,
-): Promise<{ configUpdated: boolean }> {
-  const secret = await readSecretFromStdin(stdin);
+): Promise<{ configUpdated: boolean; extractedFromBlock: boolean }> {
+  const { secret, extractedFromBlock } = parseSecretInput(await readAll(stdin));
 
   await keychain.store(account, secret);
 
@@ -94,7 +159,7 @@ export async function setSecretFromStdin(
   try {
     text = await readFile(configPath, 'utf-8');
   } catch {
-    return { configUpdated: false };
+    return { configUpdated: false, extractedFromBlock };
   }
 
   let configUpdated = false;
@@ -116,5 +181,5 @@ export async function setSecretFromStdin(
   // keychain-only rotation would be invisible to them until a restart.
   const now = new Date();
   await utimes(configPath, now, now);
-  return { configUpdated };
+  return { configUpdated, extractedFromBlock };
 }

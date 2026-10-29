@@ -14,8 +14,70 @@ describe('readSecretFromStdin', () => {
     expect(await readSecretFromStdin(Readable.from(['hunter2\r\n']))).toBe('hunter2');
   });
 
-  it('keeps interior newlines and all but the last trailing one', async () => {
-    expect(await readSecretFromStdin(Readable.from(['a\nb\n\n']))).toBe('a\nb\n');
+  // Proton Bridge's "Mailbox details" panel copies as one block — hostname,
+  // port, username, password, security, twice (IMAP + SMTP). That is what
+  // `pbpaste |` delivers in practice, so storing it verbatim (186 chars of
+  // panel text as the password) is exactly the mistake to catch.
+  const PANEL = [
+    'Hostname 127.0.0.1',
+    '',
+    'Port 1143',
+    '',
+    'Username me@example.com',
+    '',
+    'Password',
+    '',
+    'AbCdEf0123456789_-abcd',
+    '',
+    'Security STARTTLS SMTP',
+    '',
+    'Hostname 127.0.0.1',
+    '',
+    'Port 1025',
+    '',
+    'Username',
+    '',
+    'me@example.com',
+    '',
+    'Password',
+    '',
+    'AbCdEf0123456789_-abcd',
+    '',
+    'Security STARTTLS',
+    '',
+  ].join('\n');
+
+  it('extracts the password from a pasted mailbox-details block', async () => {
+    expect(await readSecretFromStdin(Readable.from([PANEL]))).toBe('AbCdEf0123456789_-abcd');
+  });
+
+  it('accepts "Password: value" on one line inside a block', async () => {
+    const block =
+      'Hostname 127.0.0.1\nPort 1143\nPassword: AbCdEf0123456789_-abcd\nSecurity STARTTLS\n';
+    expect(await readSecretFromStdin(Readable.from([block]))).toBe('AbCdEf0123456789_-abcd');
+  });
+
+  it('refuses a block whose Password fields disagree', async () => {
+    const twoValues = PANEL.replace(
+      /AbCdEf0123456789_-abcd(?![\s\S]*AbCdEf0123456789_-abcd)/,
+      'ZzYyXx9876543210_-zzzz',
+    );
+    await expect(readSecretFromStdin(Readable.from([twoValues]))).rejects.toThrow(/differ/i);
+  });
+
+  it('refuses the set-secret command line itself (the clipboard still held the command)', async () => {
+    // Copying the one-liner to paste it into the terminal replaces the
+    // password on the clipboard; `pbpaste |` then feeds the command to itself.
+    const cmd =
+      '! pbpaste | node "/Users/x/email-mcp/dist/main.js" account set-secret pandia --stdin';
+    await expect(readSecretFromStdin(Readable.from([cmd]))).rejects.toThrow(/command/i);
+    await expect(
+      readSecretFromStdin(Readable.from(['email-mcp account set-secret pandia --stdin\n'])),
+    ).rejects.toThrow(/command/i);
+  });
+
+  it('refuses any other multi-line input rather than storing it as the secret', async () => {
+    await expect(readSecretFromStdin(Readable.from(['a\nb\n\n']))).rejects.toThrow(/one line/i);
   });
 
   it('reassembles chunked input', async () => {
@@ -87,7 +149,7 @@ password = "w"
     );
 
     expect(keychain.store).toHaveBeenCalledWith('pandia', 's3cr3t');
-    expect(result).toEqual({ configUpdated: true });
+    expect(result).toEqual({ configUpdated: true, extractedFromBlock: false });
     const text = readFileSync(configPath, 'utf-8');
     expect(text).toContain('password = "keychain:pandia"');
     expect(text).not.toContain('old-plaintext');
@@ -106,7 +168,7 @@ password = "w"
     );
 
     expect(keychain.store).toHaveBeenCalledWith('ghost', 's3cr3t');
-    expect(result).toEqual({ configUpdated: false });
+    expect(result).toEqual({ configUpdated: false, extractedFromBlock: false });
     expect(readFileSync(configPath, 'utf-8')).toBe(CONFIG);
   });
 
@@ -118,7 +180,17 @@ password = "w"
       fakeKeychain(),
     );
 
-    expect(result).toEqual({ configUpdated: false });
+    expect(result).toEqual({ configUpdated: false, extractedFromBlock: false });
+  });
+
+  it('reports when the secret was pulled out of a pasted block, so the CLI can say so', async () => {
+    const keychain = fakeKeychain();
+    const block = 'Hostname 127.0.0.1\nPassword\n\nAbCdEf0123456789_-abcd\nSecurity STARTTLS\n';
+
+    const result = await setSecretFromStdin('pandia', Readable.from([block]), configPath, keychain);
+
+    expect(keychain.store).toHaveBeenCalledWith('pandia', 'AbCdEf0123456789_-abcd');
+    expect(result).toEqual({ configUpdated: true, extractedFromBlock: true });
   });
 
   it('fails loudly and leaves the config alone when the keychain read-back differs', async () => {

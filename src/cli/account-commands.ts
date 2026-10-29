@@ -953,10 +953,15 @@ async function setSecretPiped(name: string): Promise<void> {
   }
 
   try {
-    const { configUpdated } = await setSecretFromStdin(name, process.stdin);
+    const { configUpdated, extractedFromBlock } = await setSecretFromStdin(name, process.stdin);
     console.log(
       `✅ Stored the secret for "${name}" in the OS keychain (service "${KEYCHAIN_SERVICE}").`,
     );
+    if (extractedFromBlock) {
+      console.log(
+        '   Standard input was a pasted mailbox-details block — only its Password value was stored.',
+      );
+    }
     if (configUpdated) {
       console.log(`   ${CONFIG_FILE} now reads: password = "${keychainRefFor(name)}"`);
       console.log(
