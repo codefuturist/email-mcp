@@ -391,6 +391,25 @@ export default class NotifierService {
   // -------------------------------------------------------------------------
 
   private async sendWebhook(payload: AlertPayload): Promise<void> {
+    await this.postWebhook(`email.${payload.priority}`, {
+      account: payload.account,
+      sender: payload.sender,
+      subject: payload.subject,
+      priority: payload.priority,
+      labels: payload.labels ?? [],
+      rule: payload.ruleName ?? null,
+      uid: payload.uid ?? null,
+      folder: payload.folder ?? null,
+      hasAttachments: payload.hasAttachments ?? false,
+    });
+  }
+
+  /**
+   * POST any event to the configured webhook — the email alerts above, and
+   * anything else that deserves the same external channel (a rejected
+   * credential, say). No-op without a URL; never follows redirects.
+   */
+  async postWebhook(event: string, data: Record<string, unknown>): Promise<void> {
     if (!this.config.webhookUrl) return;
 
     try {
@@ -404,19 +423,7 @@ export default class NotifierService {
       return;
     }
 
-    const body = JSON.stringify({
-      event: `email.${payload.priority}`,
-      account: payload.account,
-      sender: payload.sender,
-      subject: payload.subject,
-      priority: payload.priority,
-      labels: payload.labels ?? [],
-      rule: payload.ruleName ?? null,
-      uid: payload.uid ?? null,
-      folder: payload.folder ?? null,
-      hasAttachments: payload.hasAttachments ?? false,
-      timestamp: new Date().toISOString(),
-    });
+    const body = JSON.stringify({ event, ...data, timestamp: new Date().toISOString() });
 
     const controller = new AbortController();
     const timeout = setTimeout(() => {

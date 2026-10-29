@@ -66,6 +66,8 @@ export const AccountConfigSchema = z
     sent_mailbox: z.string().optional(),
     /** Per-account override of the Sent-copy default (see appendToSent). */
     save_to_sent: z.boolean().optional(),
+    /** Per-account override of [settings.credential_alerts] enabled. */
+    credential_alerts: z.boolean().optional(),
   })
   .refine((data) => data.password ?? data.oauth2, {
     message: 'Either password or oauth2 config is required',
@@ -105,6 +107,23 @@ export const AlertsConfigSchema = z.object({
   webhook_events: z
     .array(z.enum(['urgent', 'high', 'normal', 'low']))
     .default((): ('urgent' | 'high' | 'normal' | 'low')[] => ['urgent', 'high']),
+});
+
+/**
+ * Desktop notification when a server rejects an account's credentials — the
+ * one failure that never fixes itself (Proton Bridge mints a new password
+ * on every account re-add). On by default: a silent failure here means a
+ * mailbox nobody notices is dead. Per account, `credential_alerts` on the
+ * account overrides `enabled`.
+ */
+export const CredentialAlertsConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** Play the alert sound with the notification. */
+  sound: z.boolean().default(true),
+  /** Remind again every N minutes while still broken; 0 = once per failure. */
+  remind_every_minutes: z.number().int().min(0).max(10080).default(0),
+  /** Also POST a `credential.rejected` event to [settings.hooks.alerts] webhook_url. */
+  webhook: z.boolean().default(false),
 });
 
 export const HooksConfigSchema = z.object({
@@ -288,6 +307,15 @@ export const SettingsSchema = z.object({
         allowed_hosts: [],
       }) as z.infer<typeof ServerConfigSchema>,
   ),
+  credential_alerts: CredentialAlertsConfigSchema.default(
+    () =>
+      ({
+        enabled: true,
+        sound: true,
+        remind_every_minutes: 0,
+        webhook: false,
+      }) as z.infer<typeof CredentialAlertsConfigSchema>,
+  ),
   verification: VerificationConfigSchema.default(
     () =>
       ({
@@ -396,6 +424,12 @@ export const AppConfigFileSchema = z.object({
           max_bytes: DEFAULT_ATTACHMENT_DOWNLOAD_MAX_BYTES,
         },
         scheduler: { sent_retention_days: 90 },
+        credential_alerts: {
+          enabled: true,
+          sound: true,
+          remind_every_minutes: 0,
+          webhook: false,
+        },
         cache: {
           enabled: true,
           mailboxes: ['INBOX'],

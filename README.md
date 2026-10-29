@@ -714,7 +714,8 @@ one, mints a new mailbox password every time its account is re-added — the
 watcher sends **one desktop notification per account** naming the account
 and the `set-secret --stdin` command that fixes it, then retries every 15
 minutes instead of hammering the server; a successful login re-arms the
-notification for the next rotation.
+notification for the next rotation. Tune or silence it under
+[`[settings.credential_alerts]`](#credential-alerts).
 
 At rest the secret lives in your **login keychain**, encrypted and unlocked by
 your macOS login (Touch ID at the login level). A running `email-mcp` daemon
@@ -981,6 +982,31 @@ urgency_threshold = "high"  # minimum priority to trigger desktop alert
 webhook_url = "https://ntfy.sh/my-email-alerts"  # optional: Slack, Discord, ntfy.sh, etc.
 webhook_events = ["urgent", "high"]
 ```
+
+##### Credential alerts
+
+Separate from email alerts, and **on by default**: when a server rejects an
+account's password (Proton Bridge mints a new one whenever its account is
+re-added; app passwords get revoked), the watcher sends a desktop notification
+naming the account and the `set-secret --stdin` command that fixes it.
+
+```toml
+[settings.credential_alerts]
+enabled = true              # desktop notification on a rejected password
+sound = true                # play the alert sound with it
+remind_every_minutes = 0    # remind again every N minutes while still broken (0 = once per failure)
+webhook = false             # also POST a credential.rejected event to webhook_url above
+
+[[accounts]]
+name = "noisy-test-box"
+credential_alerts = false   # per-account override of `enabled` (true forces it on, too)
+```
+
+A successful login ends the failure episode, so the next rotation notifies
+again. Change these live with `email-mcp config edit` (section *Credential
+alerts*) or the `configure_alerts` tool's `credential_alerts` object; the
+watcher itself backs off to one attempt every 15 minutes while a password is
+rejected, so a stale credential never hammers the server.
 
 **Supported platforms:** macOS (Notification Center via `osascript`), Linux (`notify-send`), Windows (PowerShell toast). Zero npm dependencies — uses native OS commands.
 

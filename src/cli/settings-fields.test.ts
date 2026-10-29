@@ -5,6 +5,7 @@ import {
   AttachmentDownloadConfigSchema,
   AttachmentsConfigSchema,
   CacheConfigSchema,
+  CredentialAlertsConfigSchema,
   HooksConfigSchema,
   SchedulerConfigSchema,
   SendConfigSchema,
@@ -57,6 +58,7 @@ describe('SETTINGS_SECTIONS drift guards', () => {
       SettingsSchema.shape,
       [
         'verification',
+        'credential_alerts',
         'cache',
         'watcher',
         'hooks',
@@ -76,6 +78,7 @@ describe('SETTINGS_SECTIONS drift guards', () => {
     ['cache', CacheConfigSchema.shape, []],
     ['hooks', HooksConfigSchema.shape, ['rules', 'alerts']],
     ['alerts', AlertsConfigSchema.shape, []],
+    ['credential_alerts', CredentialAlertsConfigSchema.shape, []],
     ['server', ServerConfigSchema.shape, []],
   ];
 
@@ -89,7 +92,7 @@ describe('SETTINGS_SECTIONS drift guards', () => {
     expect(catalogKeys).toEqual(schemaKeys);
   });
 
-  it('exposes all eleven sections in order', () => {
+  it('exposes all twelve sections in order', () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       'general',
       'server',
@@ -102,6 +105,7 @@ describe('SETTINGS_SECTIONS drift guards', () => {
       'cache',
       'hooks',
       'alerts',
+      'credential_alerts',
     ]);
   });
 

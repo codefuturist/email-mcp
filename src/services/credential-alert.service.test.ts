@@ -1,4 +1,4 @@
-import type { AccountConfig } from '../types/index.js';
+import type { AccountConfig, CredentialAlertsConfig } from '../types/index.js';
 import CredentialAlertService from './credential-alert.service.js';
 
 vi.mock('../logging.js', () => ({
@@ -20,17 +20,29 @@ const other: AccountConfig = { ...account, name: 'work', email: 'me@work.example
 const rejected = () =>
   Object.assign(new Error('Invalid credentials (Failure)'), { authenticationFailed: true });
 
-function fakeNotifier(sound = false) {
+function fakeNotifier() {
   return {
     notifyRaw: vi.fn().mockResolvedValue(undefined),
-    getConfig: () => ({ sound }),
+    postWebhook: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+const defaults: CredentialAlertsConfig = {
+  enabled: true,
+  sound: true,
+  remindEveryMinutes: 0,
+  webhook: false,
+};
+
+function build(overrides: Partial<CredentialAlertsConfig> = {}, now?: () => number) {
+  const notifier = fakeNotifier();
+  const alerts = new CredentialAlertService(notifier as never, { ...defaults, ...overrides }, now);
+  return { notifier, alerts };
 }
 
 describe('CredentialAlertService', () => {
   it('sends one desktop notification naming the account and the piped fix', async () => {
-    const notifier = fakeNotifier();
-    const alerts = new CredentialAlertService(notifier as never);
+    const { notifier, alerts } = build();
 
     expect(await alerts.report(account, 'IMAP', rejected())).toBe(true);
 
@@ -45,8 +57,7 @@ describe('CredentialAlertService', () => {
   it('notifies once per failure episode, not on every retry', async () => {
     // The watcher retries a rejected password every 15 minutes; the person
     // has to be told once, not be nagged until they fix it.
-    const notifier = fakeNotifier();
-    const alerts = new CredentialAlertService(notifier as never);
+    const { notifier, alerts } = build();
 
     await alerts.report(account, 'IMAP', rejected());
     expect(await alerts.report(account, 'IMAP', rejected())).toBe(false);
@@ -55,8 +66,7 @@ describe('CredentialAlertService', () => {
   });
 
   it('re-arms after the account logs in again', async () => {
-    const notifier = fakeNotifier();
-    const alerts = new CredentialAlertService(notifier as never);
+    const { notifier, alerts } = build();
 
     await alerts.report(account, 'IMAP', rejected());
     alerts.clear('pandia');
@@ -66,8 +76,7 @@ describe('CredentialAlertService', () => {
   });
 
   it('tracks accounts independently', async () => {
-    const notifier = fakeNotifier();
-    const alerts = new CredentialAlertService(notifier as never);
+    const { notifier, alerts } = build();
 
     await alerts.report(account, 'IMAP', rejected());
     expect(await alerts.report(other, 'SMTP', rejected())).toBe(true);
@@ -77,8 +86,7 @@ describe('CredentialAlertService', () => {
   });
 
   it('ignores errors that are not credential rejections', async () => {
-    const notifier = fakeNotifier();
-    const alerts = new CredentialAlertService(notifier as never);
+    const { notifier, alerts } = build();
     const down = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
 
     expect(await alerts.report(account, 'IMAP', down)).toBe(false);
@@ -86,23 +94,104 @@ describe('CredentialAlertService', () => {
     expect(notifier.notifyRaw).not.toHaveBeenCalled();
   });
 
-  it('plays the sound when alerts.sound is on', async () => {
-    const notifier = fakeNotifier(true);
-    const alerts = new CredentialAlertService(notifier as never);
-
-    await alerts.report(account, 'IMAP', rejected());
-
-    expect(notifier.notifyRaw.mock.calls[0]?.[2]).toEqual({ sound: true });
-  });
-
   it('stays armed when the desktop tool fails, so the next retry can try again', async () => {
-    const notifier = fakeNotifier();
+    const { notifier, alerts } = build();
     notifier.notifyRaw.mockRejectedValueOnce(new Error('osascript: not found'));
-    const alerts = new CredentialAlertService(notifier as never);
 
     expect(await alerts.report(account, 'IMAP', rejected())).toBe(false);
     expect(await alerts.report(account, 'IMAP', rejected())).toBe(true);
 
     expect(notifier.notifyRaw).toHaveBeenCalledTimes(2);
+  });
+
+  describe('configuration', () => {
+    it('is silent when disabled', async () => {
+      const { notifier, alerts } = build({ enabled: false });
+
+      expect(await alerts.report(account, 'IMAP', rejected())).toBe(false);
+
+      expect(notifier.notifyRaw).not.toHaveBeenCalled();
+    });
+
+    it('follows the sound setting', async () => {
+      const quiet = build({ sound: false });
+      await quiet.alerts.report(account, 'IMAP', rejected());
+      expect(quiet.notifier.notifyRaw.mock.calls[0]?.[2]).toEqual({ sound: false });
+
+      const loud = build({ sound: true });
+      await loud.alerts.report(account, 'IMAP', rejected());
+      expect(loud.notifier.notifyRaw.mock.calls[0]?.[2]).toEqual({ sound: true });
+    });
+
+    it('lets an account opt out while the rest stay on', async () => {
+      const { notifier, alerts } = build();
+
+      expect(await alerts.report({ ...account, credentialAlerts: false }, 'IMAP', rejected())).toBe(
+        false,
+      );
+      expect(await alerts.report(other, 'IMAP', rejected())).toBe(true);
+
+      expect(notifier.notifyRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an account opt in even when alerts are off globally', async () => {
+      const { notifier, alerts } = build({ enabled: false });
+
+      expect(await alerts.report({ ...account, credentialAlerts: true }, 'IMAP', rejected())).toBe(
+        true,
+      );
+
+      expect(notifier.notifyRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('reminds again after remind_every_minutes while still broken', async () => {
+      let clock = 1_000_000;
+      const { notifier, alerts } = build({ remindEveryMinutes: 60 }, () => clock);
+
+      expect(await alerts.report(account, 'IMAP', rejected())).toBe(true);
+      clock += 59 * 60_000;
+      expect(await alerts.report(account, 'IMAP', rejected())).toBe(false);
+      clock += 1 * 60_000;
+      expect(await alerts.report(account, 'IMAP', rejected())).toBe(true);
+
+      expect(notifier.notifyRaw).toHaveBeenCalledTimes(2);
+    });
+
+    it('also posts a credential.rejected event to the webhook when asked', async () => {
+      const { notifier, alerts } = build({ webhook: true });
+
+      await alerts.report(account, 'IMAP', rejected());
+
+      expect(notifier.postWebhook).toHaveBeenCalledTimes(1);
+      const [event, data] = notifier.postWebhook.mock.calls[0] as [string, Record<string, unknown>];
+      expect(event).toBe('credential.rejected');
+      expect(data).toMatchObject({
+        account: 'pandia',
+        email: 'me@example.com',
+        protocol: 'IMAP',
+        server: '127.0.0.1:1143',
+      });
+      expect(String(data.fix)).toContain('email-mcp account set-secret pandia --stdin');
+    });
+
+    it('leaves the webhook alone by default', async () => {
+      const { notifier, alerts } = build();
+
+      await alerts.report(account, 'IMAP', rejected());
+
+      expect(notifier.postWebhook).not.toHaveBeenCalled();
+    });
+
+    it('can be reconfigured at runtime', async () => {
+      const { notifier, alerts } = build();
+
+      expect(alerts.updateConfig({ enabled: false })).toEqual({ ...defaults, enabled: false });
+      expect(await alerts.report(account, 'IMAP', rejected())).toBe(false);
+
+      alerts.updateConfig({ enabled: true, sound: false });
+      expect(alerts.getConfig()).toEqual({ ...defaults, sound: false });
+      expect(await alerts.report(account, 'IMAP', rejected())).toBe(true);
+      expect(notifier.notifyRaw.mock.calls[0]?.[2]).toEqual({ sound: false });
+    });
   });
 });

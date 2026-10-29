@@ -630,3 +630,51 @@ host = "smtp.example.com"
     expect(config.accounts[0]!.password).toBe('secret');
   });
 });
+
+describe('credential alerts mapping', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cred-alerts-cfg-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('normalizes [settings.credential_alerts] and the per-account override to camelCase', async () => {
+    const toml = `${MINIMAL_TOML}
+[settings.credential_alerts]
+sound = false
+remind_every_minutes = 360
+webhook = true
+`.replace('[[accounts]]', '[[accounts]]\ncredential_alerts = false');
+    const configPath = path.join(tmpDir, 'config.toml');
+    await fs.writeFile(configPath, toml, 'utf-8');
+
+    const config = await loadConfig(configPath);
+
+    expect(config.settings.credentialAlerts).toEqual({
+      enabled: true,
+      sound: false,
+      remindEveryMinutes: 360,
+      webhook: true,
+    });
+    expect(config.accounts[0]?.credentialAlerts).toBe(false);
+  });
+
+  it('defaults credential alerts on, once per failure, no webhook', async () => {
+    const configPath = path.join(tmpDir, 'config.toml');
+    await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+
+    const config = await loadConfig(configPath);
+
+    expect(config.settings.credentialAlerts).toEqual({
+      enabled: true,
+      sound: true,
+      remindEveryMinutes: 0,
+      webhook: false,
+    });
+    expect(config.accounts[0]?.credentialAlerts).toBeUndefined();
+  });
+});

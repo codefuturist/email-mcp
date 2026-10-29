@@ -88,6 +88,15 @@ function loadFromEnv(): RawAppConfig | null {
           .map((s) => s.trim())
           .filter(Boolean),
       },
+      credential_alerts: {
+        enabled: process.env.MCP_EMAIL_CREDENTIAL_ALERTS !== 'false',
+        sound: process.env.MCP_EMAIL_CREDENTIAL_ALERTS_SOUND !== 'false',
+        remind_every_minutes: parseInt(
+          process.env.MCP_EMAIL_CREDENTIAL_ALERTS_REMIND_EVERY_MINUTES ?? '0',
+          10,
+        ),
+        webhook: process.env.MCP_EMAIL_CREDENTIAL_ALERTS_WEBHOOK === 'true',
+      },
       send: {
         max_attachment_mb: parseInt(process.env.MCP_EMAIL_SEND_MAX_ATTACHMENT_MB ?? '25', 10),
         save_to_sent: process.env.MCP_EMAIL_SEND_SAVE_TO_SENT === 'true',
@@ -282,6 +291,7 @@ function normalizeAccount(raw: RawAccountConfig): AccountConfig {
     maxAttachmentMb: raw.max_attachment_mb,
     sentMailbox: raw.sent_mailbox,
     saveToSent: raw.save_to_sent,
+    credentialAlerts: raw.credential_alerts,
     imap: {
       host: raw.imap.host,
       port: raw.imap.port,
@@ -351,6 +361,12 @@ function normalizeConfig(raw: RawAppConfig): AppConfig {
         accounts: raw.settings.verification.accounts,
         senderAllowlist: raw.settings.verification.sender_allowlist,
         senderDenylist: raw.settings.verification.sender_denylist,
+      },
+      credentialAlerts: {
+        enabled: raw.settings.credential_alerts.enabled,
+        sound: raw.settings.credential_alerts.sound,
+        remindEveryMinutes: raw.settings.credential_alerts.remind_every_minutes,
+        webhook: raw.settings.credential_alerts.webhook,
       },
       send: {
         maxAttachmentMb: raw.settings.send.max_attachment_mb,
@@ -648,6 +664,16 @@ read_only = false  # set to true to disable the mailbox-write tools
 # accounts = []              # watch these accounts only (empty = all)
 # sender_allowlist = []      # e.g. ["*@github.com", "*@google.com"]
 # sender_denylist = []
+
+# Credential alerts — a desktop notification when a server rejects an
+# account's password (Proton Bridge mints a new one whenever its account is
+# re-added). On by default; set credential_alerts = false on an account to
+# silence just that one.
+# [settings.credential_alerts]
+# enabled = true
+# sound = true               # play the alert sound with the notification
+# remind_every_minutes = 0   # remind again every N minutes while still broken (0 = once)
+# webhook = false            # also POST credential.rejected to [settings.hooks.alerts] webhook_url
 
 # [settings.hooks]
 # on_new_email = "notify"  # "triage" (AI) | "notify" (log) | "none"

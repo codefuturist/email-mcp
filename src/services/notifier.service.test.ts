@@ -138,3 +138,44 @@ describe('NotifierService webhook dispatch', () => {
     });
   });
 });
+
+describe('NotifierService.postWebhook', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('posts an arbitrary event to the configured webhook, never following redirects', async () => {
+    const notifier = new NotifierService(
+      buildAlertsConfig({ webhookUrl: 'https://hooks.example.com/wh' }),
+    );
+    await notifier.postWebhook('credential.rejected', { account: 'pandia', protocol: 'IMAP' });
+    notifier.stop();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://hooks.example.com/wh');
+    expect(init.redirect).toBe('error');
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      event: 'credential.rejected',
+      account: 'pandia',
+      protocol: 'IMAP',
+    });
+    expect(typeof body.timestamp).toBe('string');
+  });
+
+  it('is a no-op without a webhook URL', async () => {
+    const notifier = new NotifierService(buildAlertsConfig({ webhookUrl: '' }));
+    await notifier.postWebhook('credential.rejected', { account: 'pandia' });
+    notifier.stop();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

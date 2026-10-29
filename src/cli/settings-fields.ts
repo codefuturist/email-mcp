@@ -15,6 +15,7 @@ import {
   AttachmentDownloadConfigSchema,
   AttachmentsConfigSchema,
   CacheConfigSchema,
+  CredentialAlertsConfigSchema,
   HooksConfigSchema,
   SchedulerConfigSchema,
   SendConfigSchema,
@@ -35,7 +36,8 @@ export type SectionId =
   | 'verification'
   | 'cache'
   | 'hooks'
-  | 'alerts';
+  | 'alerts'
+  | 'credential_alerts';
 export type FieldKind = 'boolean' | 'int' | 'string' | 'enum' | 'string-array' | 'enum-array';
 
 export interface FieldDescriptor {
@@ -522,6 +524,42 @@ export const SETTINGS_SECTIONS: SectionDescriptor[] = [
         kind: 'enum-array',
         schema: alertsShape.webhook_events,
         options: ['urgent', 'high', 'normal', 'low'],
+      },
+    ],
+  },
+  {
+    id: 'credential_alerts',
+    label: 'Credential alerts (rejected password → notification)',
+    resolve: (raw) => raw.settings.credential_alerts as unknown as Record<string, unknown>,
+    summarize: (raw) => {
+      const c = raw.settings.credential_alerts;
+      const remind = c.remind_every_minutes === 0 ? 'once' : `every ${c.remind_every_minutes} min`;
+      return `${onOff(c.enabled)} | sound ${onOff(c.sound)} | remind ${remind} | webhook ${onOff(c.webhook)}`;
+    },
+    fields: [
+      {
+        key: 'enabled',
+        label: 'Notify when a server rejects an account password',
+        kind: 'boolean',
+        schema: CredentialAlertsConfigSchema.shape.enabled,
+      },
+      {
+        key: 'sound',
+        label: 'Play a sound with the notification',
+        kind: 'boolean',
+        schema: CredentialAlertsConfigSchema.shape.sound,
+      },
+      {
+        key: 'remind_every_minutes',
+        label: 'Remind again every N minutes while still broken (0 = once, max 10080)',
+        kind: 'int',
+        schema: CredentialAlertsConfigSchema.shape.remind_every_minutes,
+      },
+      {
+        key: 'webhook',
+        label: 'Also post a credential.rejected event to the alerts webhook',
+        kind: 'boolean',
+        schema: CredentialAlertsConfigSchema.shape.webhook,
       },
     ],
   },

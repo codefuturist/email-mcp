@@ -118,7 +118,10 @@ export async function buildServices(): Promise<AppServices> {
   // A rejected credential is the one failure that never fixes itself, so the
   // watcher announces it on the desktop — through the hooks notifier, behind
   // the same per-minute rate limit as every other desktop alert.
-  const credentialAlerts = new CredentialAlertService(hooksService.getNotifier());
+  const credentialAlerts = new CredentialAlertService(
+    hooksService.getNotifier(),
+    config.settings.credentialAlerts,
+  );
   const watcherService = new WatcherService(
     config.settings.watcher,
     config.accounts,

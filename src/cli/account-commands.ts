@@ -556,6 +556,12 @@ async function addAccount(): Promise<void> {
             token: '',
             allowed_hosts: [],
           },
+          credential_alerts: {
+            enabled: true,
+            sound: true,
+            remind_every_minutes: 0,
+            webhook: false,
+          },
           verification: {
             enabled: true,
             auto_copy: true,

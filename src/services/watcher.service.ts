@@ -140,6 +140,11 @@ export default class WatcherService {
     this.idleStates.clear();
   }
 
+  /** The alert service this watcher reports to, for runtime reconfiguration. */
+  getCredentialAlerts(): CredentialAlertService | undefined {
+    return this.credentialAlerts;
+  }
+
   getStatus(): WatcherStatus[] {
     return [...this.idleStates.values()].map((state) => ({
       account: state.account.name,

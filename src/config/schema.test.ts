@@ -277,3 +277,42 @@ describe('cache window default', () => {
     expect(parsed.cache.window_days).toBe(0);
   });
 });
+
+describe('credential alerts settings', () => {
+  const expectedDefaults = {
+    enabled: true,
+    sound: true,
+    remind_every_minutes: 0,
+    webhook: false,
+  };
+
+  it('applies credential_alerts defaults via SettingsSchema', () => {
+    expect(SettingsSchema.parse({}).credential_alerts).toEqual(expectedDefaults);
+  });
+
+  // Guards the duplicated default literal in AppConfigFileSchema.
+  it('applies credential_alerts defaults when settings is absent entirely', () => {
+    const result = AppConfigFileSchema.parse({ accounts: [validAccount()] });
+    expect(result.settings.credential_alerts).toEqual(expectedDefaults);
+  });
+
+  it('bounds remind_every_minutes to 0..10080 (a week)', () => {
+    const parse = (remind_every_minutes: number) =>
+      SettingsSchema.parse({ credential_alerts: { remind_every_minutes } }).credential_alerts
+        .remind_every_minutes;
+    expect(() => parse(-1)).toThrow();
+    expect(parse(0)).toBe(0);
+    expect(parse(10080)).toBe(10080);
+    expect(() => parse(10081)).toThrow();
+  });
+
+  it('lets an account opt out (or in) individually', () => {
+    const optedOut = AppConfigFileSchema.parse({
+      accounts: [{ ...validAccount(), credential_alerts: false }],
+    });
+    expect(optedOut.accounts[0]?.credential_alerts).toBe(false);
+
+    const unset = AppConfigFileSchema.parse({ accounts: [validAccount()] });
+    expect(unset.accounts[0]?.credential_alerts).toBeUndefined();
+  });
+});

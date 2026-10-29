@@ -10,7 +10,50 @@ import type HooksService from '../services/hooks.service.js';
 import NotifierService from '../services/notifier.service.js';
 import { listPresets as listAllPresets } from '../services/presets.js';
 import type WatcherService from '../services/watcher.service.js';
-import type { AlertsConfig } from '../types/index.js';
+import type { AlertsConfig, CredentialAlertsConfig } from '../types/index.js';
+
+/** The [settings.credential_alerts] keys as the tool accepts them (snake_case, all optional). */
+export interface CredentialAlertsInput {
+  enabled?: boolean;
+  sound?: boolean;
+  remind_every_minutes?: number;
+  webhook?: boolean;
+}
+
+/** Partial tool input → partial runtime patch; unset keys stay unset. */
+export function credentialAlertsFromRaw(
+  input: CredentialAlertsInput,
+): Partial<CredentialAlertsConfig> {
+  const patch: Partial<CredentialAlertsConfig> = {};
+  if (input.enabled !== undefined) patch.enabled = input.enabled;
+  if (input.sound !== undefined) patch.sound = input.sound;
+  if (input.remind_every_minutes !== undefined) {
+    patch.remindEveryMinutes = input.remind_every_minutes;
+  }
+  if (input.webhook !== undefined) patch.webhook = input.webhook;
+  return patch;
+}
+
+/** Runtime config → the config.toml section, for persisting. */
+export function credentialAlertsToRaw(
+  cfg: CredentialAlertsConfig,
+): Required<CredentialAlertsInput> {
+  return {
+    enabled: cfg.enabled,
+    sound: cfg.sound,
+    remind_every_minutes: cfg.remindEveryMinutes,
+    webhook: cfg.webhook,
+  };
+}
+
+/** One line for tool output: "on, sound on, remind once per failure, webhook off". */
+function describeCredentialAlerts(cfg?: CredentialAlertsConfig): string {
+  if (!cfg) return '(watcher not running)';
+  const onOff = (v: boolean) => (v ? 'on' : 'off');
+  const remind =
+    cfg.remindEveryMinutes === 0 ? 'once per failure' : `every ${cfg.remindEveryMinutes} min`;
+  return `${onOff(cfg.enabled)}, sound ${onOff(cfg.sound)}, remind ${remind}, webhook ${onOff(cfg.webhook)}`;
+}
 
 export default function registerWatcherTools(
   server: McpServer,
@@ -280,8 +323,9 @@ export default function registerWatcherTools(
     {
       title: 'Configure alerts',
       description:
-        'Update alert/notification settings at runtime. Changes take effect immediately. ' +
-        'Use save=true to persist changes to the config file. ' +
+        'Update alert/notification settings at runtime, including credential alerts ' +
+        '(the desktop notification sent when a server rejects an account password). ' +
+        'Changes take effect immediately. Use save=true to persist changes to the config file. ' +
         'Omit any field to leave it unchanged.',
       inputSchema: z.object({
         desktop: z.boolean().optional().describe('Enable/disable desktop notifications'),
@@ -298,6 +342,27 @@ export default function registerWatcherTools(
           .array(z.enum(['urgent', 'high', 'normal', 'low']))
           .optional()
           .describe('Which urgency levels trigger webhook dispatch'),
+        credential_alerts: z
+          .object({
+            enabled: z
+              .boolean()
+              .optional()
+              .describe('Notify on the desktop when a server rejects an account password'),
+            sound: z.boolean().optional().describe('Play a sound with that notification'),
+            remind_every_minutes: z
+              .number()
+              .int()
+              .min(0)
+              .max(10080)
+              .optional()
+              .describe('Remind again every N minutes while still broken; 0 = once per failure'),
+            webhook: z
+              .boolean()
+              .optional()
+              .describe('Also POST a credential.rejected event to webhook_url'),
+          })
+          .optional()
+          .describe('Credential-rejection notification settings ([settings.credential_alerts])'),
         save: z
           .boolean()
           .default(false)
@@ -311,10 +376,15 @@ export default function registerWatcherTools(
       urgency_threshold: urgencyThreshold,
       webhook_url: webhookUrl,
       webhook_events: webhookEvents,
+      credential_alerts: credentialAlertsInput,
       save,
     }) => {
       try {
         const notifier = hooksService.getNotifier();
+        const credentialService = watcherService.getCredentialAlerts();
+        const credentialPatch = credentialAlertsInput
+          ? credentialAlertsFromRaw(credentialAlertsInput)
+          : {};
 
         // Build partial update from provided fields
         const partial: Record<string, unknown> = {};
@@ -324,7 +394,7 @@ export default function registerWatcherTools(
         if (webhookUrl !== undefined) partial.webhookUrl = webhookUrl;
         if (webhookEvents !== undefined) partial.webhookEvents = webhookEvents;
 
-        if (Object.keys(partial).length === 0) {
+        if (Object.keys(partial).length === 0 && Object.keys(credentialPatch).length === 0) {
           const current = notifier.getConfig();
           return {
             content: [
@@ -336,7 +406,8 @@ export default function registerWatcherTools(
                   `  Sound:     ${current.sound ? '✅' : '❌'}\n` +
                   `  Threshold: ${current.urgencyThreshold}\n` +
                   `  Webhook:   ${current.webhookUrl || '(none)'}\n` +
-                  `  Events:    ${current.webhookEvents.join(', ')}`,
+                  `  Events:    ${current.webhookEvents.join(', ')}\n` +
+                  `  Credential alerts: ${describeCredentialAlerts(credentialService?.getConfig())}`,
               },
             ],
           };
@@ -347,6 +418,12 @@ export default function registerWatcherTools(
 
         // Also update the in-memory hooks config alerts reference
         hooksConfig.alerts = { ...updated };
+
+        // Credential alerts live on the watcher's alert service.
+        const credentialUpdated =
+          Object.keys(credentialPatch).length > 0
+            ? credentialService?.updateConfig(credentialPatch)
+            : credentialService?.getConfig();
 
         // Persist to file if requested
         let persistMsg = '';
@@ -360,6 +437,9 @@ export default function registerWatcherTools(
               webhook_url: updated.webhookUrl,
               webhook_events: updated.webhookEvents,
             };
+            if (credentialUpdated) {
+              rawConfig.settings.credential_alerts = credentialAlertsToRaw(credentialUpdated);
+            }
             await saveConfigValidated(rawConfig);
             persistMsg = '\n\n💾 Changes saved to config file.';
           } catch (err) {
@@ -375,6 +455,7 @@ export default function registerWatcherTools(
           `   Threshold: ${updated.urgencyThreshold}`,
           `   Webhook:   ${updated.webhookUrl || '(none)'}`,
           `   Events:    ${updated.webhookEvents.join(', ')}`,
+          `   Credential alerts: ${describeCredentialAlerts(credentialUpdated)}`,
           persistMsg,
         ];
 

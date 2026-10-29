@@ -49,6 +49,7 @@ function createConfig(readOnly: boolean): AppConfig {
       rateLimit: 10,
       readOnly,
       server: { host: '127.0.0.1', port: 8080, path: '/mcp', token: '', allowedHosts: [] },
+      credentialAlerts: { enabled: true, sound: true, remindEveryMinutes: 0, webhook: false },
       verification: {
         enabled: true,
         autoCopy: true,

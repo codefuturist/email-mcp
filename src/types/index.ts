@@ -68,6 +68,8 @@ export interface AccountConfig {
   oauth2?: OAuth2Config;
   /** Optional per-account attachment cap (MB, base64-encoded total). */
   maxAttachmentMb?: number;
+  /** Per-account override of settings.credentialAlerts.enabled. */
+  credentialAlerts?: boolean;
   /**
    * Settles which folder `appendToSent` files a copy into, for a mailbox
    * that carries several sent-shaped folders (e.g. a leftover `Sent` beside
@@ -90,6 +92,16 @@ export interface WatcherConfig {
   enabled: boolean;
   folders: string[];
   idleTimeout: number;
+}
+
+/** Desktop notification when a server rejects an account's credentials. */
+export interface CredentialAlertsConfig {
+  enabled: boolean;
+  sound: boolean;
+  /** Remind again every N minutes while still broken; 0 = once per failure. */
+  remindEveryMinutes: number;
+  /** Also POST a `credential.rejected` event to the alerts webhook. */
+  webhook: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +235,7 @@ export interface AppConfig {
     readOnly: boolean;
     server: ServerConfig;
     verification: VerificationConfig;
+    credentialAlerts: CredentialAlertsConfig;
     send: SendConfig;
     attachments: AttachmentsConfig;
     attachmentDownload: AttachmentDownloadConfig;
