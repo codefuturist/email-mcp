@@ -249,6 +249,44 @@ describe('WatcherService credential rejection', () => {
     await watcher.stop();
   });
 
+  it('retryNow() reconnects at once instead of waiting out the backoff', async () => {
+    connectImpl.fn = rejectAuth;
+    const watcher = new WatcherService(config, [testAccount]);
+    await watcher.start();
+    expect(instances).toHaveLength(1);
+
+    connectImpl.fn = async () => undefined;
+    await watcher.retryNow('test');
+
+    expect(instances).toHaveLength(2);
+    expect(watcher.getStatus()[0]?.connected).toBe(true);
+
+    await watcher.stop();
+  });
+
+  it('re-resolves a keychain:/env: password on reconnect, so a rotated secret needs no restart', async () => {
+    process.env.WATCHER_TEST_PW = 'stale';
+    const refAccount: AccountConfig = {
+      ...testAccount,
+      password: 'stale',
+      passwordRef: 'env:WATCHER_TEST_PW',
+    };
+    connectImpl.fn = rejectAuth;
+    const watcher = new WatcherService(config, [refAccount]);
+    await watcher.start();
+    expect(instances.at(-1)?.options.auth?.pass).toBe('stale');
+
+    // The person stores the new password; the next attempt must use it.
+    process.env.WATCHER_TEST_PW = 'fresh';
+    connectImpl.fn = async () => undefined;
+    await watcher.retryNow();
+
+    expect(instances.at(-1)?.options.auth?.pass).toBe('fresh');
+
+    await watcher.stop();
+    delete process.env.WATCHER_TEST_PW;
+  });
+
   it('still retries a plain connection failure on the short backoff', async () => {
     connectImpl.fn = async () => {
       throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });

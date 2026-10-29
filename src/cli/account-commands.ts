@@ -959,7 +959,9 @@ async function setSecretPiped(name: string): Promise<void> {
     );
     if (configUpdated) {
       console.log(`   ${CONFIG_FILE} now reads: password = "${keychainRefFor(name)}"`);
-      console.log('   Restart the server for the change to take effect.');
+      console.log(
+        '   Running servers pick it up within a few seconds and reconnect; older builds need a restart.',
+      );
     } else {
       console.log(
         `   No password line for "${name}" in ${CONFIG_FILE} — set this account's credential to:\n` +

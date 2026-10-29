@@ -12,7 +12,7 @@ import BlobStore from './cache/blob-store.js';
 import { collectOrphans, enforceBudget } from './cache/maintenance.js';
 import CacheStore from './cache/store.js';
 import SyncEngine from './cache/sync-engine.js';
-import { loadConfig } from './config/loader.js';
+import { CONFIG_FILE, configExists, loadConfig } from './config/loader.js';
 import { CACHE_BLOBS_DIR, CACHE_DB } from './config/xdg.js';
 import ConnectionManager from './connections/manager.js';
 import { mcpLog } from './logging.js';
@@ -22,6 +22,7 @@ import RateLimiter from './safety/rate-limiter.js';
 import createServer from './server.js';
 import CalendarService from './services/calendar.service.js';
 import ClipboardService from './services/clipboard.service.js';
+import ConfigReloadService, { applyConfigReload } from './services/config-reload.service.js';
 import CredentialAlertService from './services/credential-alert.service.js';
 import DialogService from './services/dialog.service.js';
 import HooksService from './services/hooks.service.js';
@@ -211,6 +212,37 @@ export function startBackgroundServices(
 
   hooksService.start(lowLevelServer);
   verificationCatcher.start();
+
+  // Live config: a rotated password (`set-secret --stdin`) or a changed
+  // credential-alert setting applies to this running server — no restart,
+  // which matters when several MCP clients each run their own email-mcp.
+  let configReload: ConfigReloadService | undefined;
+  configExists()
+    .then((exists) => {
+      if (!exists) return;
+      configReload = new ConfigReloadService(CONFIG_FILE, async () => {
+        const fresh = await loadConfig();
+        const summary = await applyConfigReload(config, fresh, {
+          credentialAlerts: watcherService.getCredentialAlerts(),
+          watcher: watcherService,
+        });
+        const parts = [
+          summary.credentialsChanged.length > 0
+            ? `credentials updated for ${summary.credentialsChanged.join(', ')} (reconnecting)`
+            : '',
+          summary.alertsChanged ? 'credential alerts reconfigured' : '',
+        ].filter(Boolean);
+        await mcpLog(
+          'info',
+          'config',
+          parts.length > 0
+            ? `config.toml changed: ${parts.join('; ')}`
+            : 'config.toml changed: nothing live-reloadable differs (other settings apply on the next start)',
+        );
+      });
+      configReload.start();
+    })
+    .catch(() => {});
   syncEngine?.start();
 
   if (config.settings.verification.enabled && !config.settings.watcher.enabled) {
@@ -303,6 +335,7 @@ export function startBackgroundServices(
       if (schedulerInterval) clearInterval(schedulerInterval);
       if (cacheInterval) clearInterval(cacheInterval);
       // Before hooksService.stop() — hooks owns the shared notifier interval.
+      configReload?.stop();
       verificationCatcher.stop();
       hooksService.stop();
       await watcherService.stop();

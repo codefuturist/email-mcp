@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { chmod, readFile, utimes, writeFile } from 'node:fs/promises';
 import type { Readable } from 'node:stream';
 
 import { CONFIG_FILE } from '../config/loader.js';
@@ -97,18 +97,24 @@ export async function setSecretFromStdin(
     return { configUpdated: false };
   }
 
-  let rewritten: string;
+  let configUpdated = false;
   try {
-    rewritten = rewritePasswordToKeychainRef(text, account);
+    const rewritten = rewritePasswordToKeychainRef(text, account);
+    if (rewritten !== text) {
+      await writeFile(configPath, rewritten, { encoding: 'utf-8', mode: 0o600 });
+    }
+    configUpdated = true;
   } catch {
-    return { configUpdated: false };
+    // The account has no password line here; the caller prints what to add.
   }
 
-  if (rewritten !== text) {
-    await writeFile(configPath, rewritten, { encoding: 'utf-8', mode: 0o600 });
-  }
   // `mode` above only applies when the file is created; an existing file
   // keeps whatever it had, so enforce owner-only explicitly.
   await chmod(configPath, 0o600);
-  return { configUpdated: true };
+  // Running servers watch this file and re-resolve the secret on change.
+  // Bump the mtime even when the text is already a keychain reference, or a
+  // keychain-only rotation would be invisible to them until a restart.
+  const now = new Date();
+  await utimes(configPath, now, now);
+  return { configUpdated };
 }

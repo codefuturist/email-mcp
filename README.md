@@ -717,6 +717,15 @@ minutes instead of hammering the server; a successful login re-arms the
 notification for the next rotation. Tune or silence it under
 [`[settings.credential_alerts]`](#credential-alerts).
 
+**Live reload — no restart after a rotation.** Running servers watch
+`config.toml` (a 2 s poll) and re-resolve `keychain:`/`env:` references
+before every reconnect, so `pbpaste | email-mcp account set-secret personal
+--stdin` is the whole fix: within seconds every running email-mcp — one per
+MCP client — picks up the new secret and reconnects. Changes to
+`[settings.credential_alerts]` and a per-account `credential_alerts` flag
+apply live the same way; other settings, and accounts added or removed,
+still take effect on the next start.
+
 At rest the secret lives in your **login keychain**, encrypted and unlocked by
 your macOS login (Touch ID at the login level). A running `email-mcp` daemon
 reads it once at startup; it does **not** prompt for Touch ID on every IMAP

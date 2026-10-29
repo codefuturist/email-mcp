@@ -65,6 +65,12 @@ export interface AccountConfig {
   fullName?: string;
   username: string;
   password?: string;
+  /**
+   * The `keychain:`/`env:` reference `password` was resolved from, when it
+   * was one — so a running server can re-resolve after a rotation instead
+   * of holding the first value forever. Unset for a literal password.
+   */
+  passwordRef?: string;
   oauth2?: OAuth2Config;
   /** Optional per-account attachment cap (MB, base64-encoded total). */
   maxAttachmentMb?: number;

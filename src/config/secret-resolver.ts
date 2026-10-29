@@ -26,6 +26,11 @@ const DEFAULT_SERVICE = 'email-mcp';
 const KEYCHAIN_PREFIX = 'keychain:';
 const ENV_PREFIX = 'env:';
 
+/** Is this config value an indirection (`keychain:`/`env:`) rather than the secret itself? */
+export function isSecretReference(value: string): boolean {
+  return value.startsWith(KEYCHAIN_PREFIX) || value.startsWith(ENV_PREFIX);
+}
+
 /** Injectable reader: (command, args) => secret on stdout. */
 export type SecretRunner = (command: string, args: string[]) => Promise<string>;
 

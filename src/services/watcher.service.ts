@@ -14,6 +14,7 @@ import type { ImapFlow } from 'imapflow';
 import { mcpLog } from '../logging.js';
 import type { AccountConfig, EmailMeta, WatcherConfig } from '../types/index.js';
 import { describeAuthFailure, isAuthFailure } from '../utils/auth-error.js';
+import { refreshAccountSecret } from '../utils/credential-refresh.js';
 import { createImapClient } from '../utils/imap-client.js';
 import { readWatermark, resolveBaselineUid, writeWatermark } from '../utils/watcher-state.js';
 import type CredentialAlertService from './credential-alert.service.js';
@@ -145,6 +146,22 @@ export default class WatcherService {
     return this.credentialAlerts;
   }
 
+  /**
+   * Reconnect now — every parked or dropped IDLE, or just one account's —
+   * instead of waiting out the backoff. Used after a credential rotation.
+   */
+  async retryNow(accountName?: string): Promise<void> {
+    const attempts: Promise<void>[] = [];
+    for (const [key, state] of this.idleStates) {
+      if (accountName && state.account.name !== accountName) continue;
+      if (state.stopped || state.client?.usable) continue;
+      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+      this.updateState(key, { reconnectTimer: null, backoffMs: INITIAL_BACKOFF_MS });
+      attempts.push(this.connectIdle(key));
+    }
+    await Promise.allSettled(attempts);
+  }
+
   getStatus(): WatcherStatus[] {
     return [...this.idleStates.values()].map((state) => ({
       account: state.account.name,
@@ -192,6 +209,19 @@ export default class WatcherService {
     if (!state || state.stopped) return;
 
     try {
+      // A rotated password reaches a running server here: re-resolve a
+      // keychain:/env: reference before every connect (no-op for literals).
+      try {
+        await refreshAccountSecret(state.account);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await mcpLog(
+          'warning',
+          'watcher',
+          `Could not re-resolve the password for ${state.account.name}: ${detail} — using the last known value`,
+        );
+      }
+
       // Resolved per connect, not once at startup: OAuth access tokens are
       // short-lived relative to an IDLE hold (up to 29 minutes), so a
       // reconnect after expiry needs a fresh one. OAuthService refreshes

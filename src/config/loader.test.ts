@@ -678,3 +678,37 @@ webhook = true
     expect(config.accounts[0]?.credentialAlerts).toBeUndefined();
   });
 });
+
+describe('secret references keep their origin', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cred-ref-cfg-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    delete process.env.CRED_REF_TEST;
+  });
+
+  it('records passwordRef for an env:/keychain: password and still resolves it', async () => {
+    process.env.CRED_REF_TEST = 'pw-from-env';
+    const toml = MINIMAL_TOML.replace(/password = "[^"]*"/, 'password = "env:CRED_REF_TEST"');
+    const configPath = path.join(tmpDir, 'config.toml');
+    await fs.writeFile(configPath, toml, 'utf-8');
+
+    const config = await loadConfig(configPath);
+
+    expect(config.accounts[0]?.password).toBe('pw-from-env');
+    expect(config.accounts[0]?.passwordRef).toBe('env:CRED_REF_TEST');
+  });
+
+  it('leaves passwordRef unset for a literal password', async () => {
+    const configPath = path.join(tmpDir, 'config.toml');
+    await fs.writeFile(configPath, MINIMAL_TOML, 'utf-8');
+
+    const config = await loadConfig(configPath);
+
+    expect(config.accounts[0]?.passwordRef).toBeUndefined();
+  });
+});

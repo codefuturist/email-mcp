@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -139,5 +139,17 @@ password = "w"
     ).rejects.toThrow(/empty/i);
     expect(keychain.store).not.toHaveBeenCalled();
     expect(readFileSync(configPath, 'utf-8')).toBe(CONFIG);
+  });
+
+  it('bumps the config mtime even when the text already points at the keychain', async () => {
+    // Running servers watch the file; a rotation that changes only the
+    // keychain item would otherwise be invisible to them.
+    writeFileSync(configPath, CONFIG.replace('"old-plaintext"', '"keychain:pandia"'));
+    const past = new Date('2000-01-01T00:00:00Z');
+    utimesSync(configPath, past, past);
+
+    await setSecretFromStdin('pandia', Readable.from(['s3cr3t\n']), configPath, fakeKeychain());
+
+    expect(statSync(configPath).mtimeMs).toBeGreaterThan(past.getTime() + 1000);
   });
 });

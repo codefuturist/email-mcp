@@ -15,7 +15,7 @@ import {
 import type { AccountConfig, AppConfig, HookRule, OAuth2Config } from '../types/index.js';
 import type { RawAccountConfig, RawAppConfig } from './schema.js';
 import { AppConfigFileSchema } from './schema.js';
-import { resolveSecret } from './secret-resolver.js';
+import { isSecretReference, resolveSecret } from './secret-resolver.js';
 import { CONFIG_FILE, xdg } from './xdg.js';
 
 // ---------------------------------------------------------------------------
@@ -456,6 +456,8 @@ async function resolveAccountSecrets(accounts: AccountConfig[]): Promise<Account
     accounts.map(async (account) => {
       const resolved: AccountConfig = { ...account };
       if (account.password !== undefined) {
+        // Keep the reference: a running server re-resolves it after a rotation.
+        if (isSecretReference(account.password)) resolved.passwordRef = account.password;
         resolved.password = await resolveSecret(account.password);
       }
       if (account.oauth2) {
