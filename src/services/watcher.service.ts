@@ -16,6 +16,7 @@ import type { AccountConfig, EmailMeta, WatcherConfig } from '../types/index.js'
 import { describeAuthFailure, isAuthFailure } from '../utils/auth-error.js';
 import { createImapClient } from '../utils/imap-client.js';
 import { readWatermark, resolveBaselineUid, writeWatermark } from '../utils/watcher-state.js';
+import type CredentialAlertService from './credential-alert.service.js';
 import eventBus from './event-bus.js';
 import { messageToEmailMeta } from './imap.service.js';
 import type OAuthService from './oauth.service.js';
@@ -67,10 +68,19 @@ export default class WatcherService {
 
   private oauthService?: OAuthService;
 
-  constructor(config: WatcherConfig, accounts: AccountConfig[], oauthService?: OAuthService) {
+  /** Desktop notification on a rejected credential; absent in tests and the CLI. */
+  private credentialAlerts?: CredentialAlertService;
+
+  constructor(
+    config: WatcherConfig,
+    accounts: AccountConfig[],
+    oauthService?: OAuthService,
+    credentialAlerts?: CredentialAlertService,
+  ) {
     this.config = config;
     this.accounts = accounts;
     this.oauthService = oauthService;
+    this.credentialAlerts = credentialAlerts;
   }
 
   /**
@@ -195,6 +205,8 @@ export default class WatcherService {
       });
 
       await client.connect();
+      // Accepted credentials end any failure episode this account was in.
+      this.credentialAlerts?.clear(state.account.name);
 
       const lock = await client.getMailboxLock(state.folder);
       const { mailbox } = client;
@@ -281,6 +293,7 @@ export default class WatcherService {
             `fixed (next attempt in ${AUTH_FAILURE_BACKOFF_MS / 60_000} min).\n` +
             describeAuthFailure(err, state.account, 'IMAP'),
         );
+        await this.credentialAlerts?.report(state.account, 'IMAP', err);
         this.updateState(key, { backoffMs: AUTH_FAILURE_BACKOFF_MS });
         this.scheduleReconnect(key);
         return;

@@ -709,6 +709,13 @@ the value hex-encoded. Secrets are read back at startup over the `security`
 CLI; only the service and account names are ever passed as arguments — the
 secret travels on stdout only.
 
+When a server starts rejecting an account's credentials — Proton Bridge, for
+one, mints a new mailbox password every time its account is re-added — the
+watcher sends **one desktop notification per account** naming the account
+and the `set-secret --stdin` command that fixes it, then retries every 15
+minutes instead of hammering the server; a successful login re-arms the
+notification for the next rotation.
+
 At rest the secret lives in your **login keychain**, encrypted and unlocked by
 your macOS login (Touch ID at the login level). A running `email-mcp` daemon
 reads it once at startup; it does **not** prompt for Touch ID on every IMAP

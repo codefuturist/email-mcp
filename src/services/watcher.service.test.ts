@@ -217,6 +217,38 @@ describe('WatcherService credential rejection', () => {
     await watcher.stop();
   });
 
+  it('reports the rejection to the credential alerts, and clears it once a login succeeds', async () => {
+    const alerts = { report: vi.fn().mockResolvedValue(true), clear: vi.fn() };
+    connectImpl.fn = rejectAuth;
+    const watcher = new WatcherService(config, [testAccount], undefined, alerts as never);
+    await watcher.start();
+
+    expect(alerts.report).toHaveBeenCalledTimes(1);
+    expect(alerts.report.mock.calls[0]?.[0]).toMatchObject({ name: 'test' });
+    expect(alerts.report.mock.calls[0]?.[1]).toBe('IMAP');
+    expect(alerts.clear).not.toHaveBeenCalled();
+
+    // The password gets fixed; the next attempt is accepted.
+    connectImpl.fn = async () => undefined;
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(alerts.clear).toHaveBeenCalledWith('test');
+
+    await watcher.stop();
+  });
+
+  it('does not report a plain connection failure as a credential problem', async () => {
+    const alerts = { report: vi.fn().mockResolvedValue(true), clear: vi.fn() };
+    connectImpl.fn = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    };
+    const watcher = new WatcherService(config, [testAccount], undefined, alerts as never);
+    await watcher.start();
+
+    expect(alerts.report).not.toHaveBeenCalled();
+
+    await watcher.stop();
+  });
+
   it('still retries a plain connection failure on the short backoff', async () => {
     connectImpl.fn = async () => {
       throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });

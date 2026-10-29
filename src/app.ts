@@ -22,6 +22,7 @@ import RateLimiter from './safety/rate-limiter.js';
 import createServer from './server.js';
 import CalendarService from './services/calendar.service.js';
 import ClipboardService from './services/clipboard.service.js';
+import CredentialAlertService from './services/credential-alert.service.js';
 import DialogService from './services/dialog.service.js';
 import HooksService from './services/hooks.service.js';
 import ImapService from './services/imap.service.js';
@@ -111,10 +112,19 @@ export async function buildServices(): Promise<AppServices> {
   const schedulerService = new SchedulerService(smtpService, imapService, {
     sentRetentionDays: config.settings.scheduler.sentRetentionDays,
   });
-  const watcherService = new WatcherService(config.settings.watcher, config.accounts, oauthService);
   const hooksService = new HooksService(config.settings.hooks, imapService, {
     autoDownloadAttachments: config.settings.attachments.autoDownload,
   });
+  // A rejected credential is the one failure that never fixes itself, so the
+  // watcher announces it on the desktop — through the hooks notifier, behind
+  // the same per-minute rate limit as every other desktop alert.
+  const credentialAlerts = new CredentialAlertService(hooksService.getNotifier());
+  const watcherService = new WatcherService(
+    config.settings.watcher,
+    config.accounts,
+    oauthService,
+    credentialAlerts,
+  );
   const clipboardService = new ClipboardService();
   const dialogService = new DialogService();
   // Shares the hooks notifier so desktop notifications from both features
