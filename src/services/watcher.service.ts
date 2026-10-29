@@ -13,6 +13,7 @@
 import type { ImapFlow } from 'imapflow';
 import { mcpLog } from '../logging.js';
 import type { AccountConfig, EmailMeta, WatcherConfig } from '../types/index.js';
+import { describeAuthFailure, isAuthFailure } from '../utils/auth-error.js';
 import { createImapClient } from '../utils/imap-client.js';
 import { readWatermark, resolveBaselineUid, writeWatermark } from '../utils/watcher-state.js';
 import eventBus from './event-bus.js';
@@ -49,6 +50,13 @@ export interface WatcherStatus {
 
 const MAX_BACKOFF_MS = 60_000;
 const INITIAL_BACKOFF_MS = 1_000;
+/**
+ * A rejected credential cannot fix itself while this process runs — the
+ * config was read once at startup — and retrying it on the connection-failure
+ * cadence trips server-side login jails (Proton Bridge: "too many login
+ * attempts"), which then masks the real cause. Retry rarely, log loudly.
+ */
+const AUTH_FAILURE_BACKOFF_MS = 15 * 60_000;
 
 export default class WatcherService {
   private idleStates = new Map<string, IdleState>();
@@ -265,6 +273,18 @@ export default class WatcherService {
         `IDLE started: ${state.account.name}/${state.folder} (uid > ${uidNext - 1})`,
       );
     } catch (err) {
+      if (isAuthFailure(err)) {
+        await mcpLog(
+          'error',
+          'watcher',
+          `IDLE for ${state.account.name}/${state.folder} is parked until the credential is ` +
+            `fixed (next attempt in ${AUTH_FAILURE_BACKOFF_MS / 60_000} min).\n` +
+            describeAuthFailure(err, state.account, 'IMAP'),
+        );
+        this.updateState(key, { backoffMs: AUTH_FAILURE_BACKOFF_MS });
+        this.scheduleReconnect(key);
+        return;
+      }
       const errMsg = err instanceof Error ? err.message : String(err);
       await mcpLog(
         'warning',

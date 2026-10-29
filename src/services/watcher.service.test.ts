@@ -13,17 +13,20 @@ afterAll(() => {
   rmSync(STATE_HOME, { recursive: true, force: true });
 });
 
+import { mcpLog } from '../logging.js';
 import type { AccountConfig, WatcherConfig } from '../types/index.js';
 import eventBus from './event-bus.js';
 
 // Track constructed clients so tests can drive their event handlers.
-const { instances } = vi.hoisted(() => ({
+const { instances, connectImpl } = vi.hoisted(() => ({
   instances: [] as {
     handlers: Record<string, (data: unknown) => void>;
     fetch: ReturnType<typeof vi.fn>;
     /** Constructor options, so tests can assert the credentials used. */
     options: { auth?: { user?: string; pass?: string; accessToken?: string } };
   }[],
+  /** What connect() does; a test swaps it to make the server reject. */
+  connectImpl: { fn: async (): Promise<void> => undefined },
 }));
 
 // Mock imapflow module
@@ -32,7 +35,7 @@ vi.mock('imapflow', () => {
     usable = true;
     mailbox = { uidNext: 100 };
     handlers: Record<string, (data: unknown) => void> = {};
-    connect = vi.fn().mockResolvedValue(undefined);
+    connect = vi.fn(() => connectImpl.fn());
     logout = vi.fn().mockResolvedValue(undefined);
     getMailboxLock = vi.fn().mockResolvedValue({ release: vi.fn() });
     fetch = vi.fn().mockImplementation(() => (async function* empty() {})());
@@ -155,6 +158,75 @@ describe('WatcherService authentication', () => {
 
     await vi.waitFor(() => expect(oauthService.getAccessToken).toHaveBeenCalledTimes(2));
     expect(instances.at(-1)?.options.auth?.accessToken).toBe('second-token');
+
+    await watcher.stop();
+  });
+});
+
+describe('WatcherService credential rejection', () => {
+  const config: WatcherConfig = { enabled: true, folders: ['INBOX'], idleTimeout: 1740 };
+
+  const rejectAuth = async (): Promise<void> => {
+    throw Object.assign(new Error('Invalid credentials (Failure)'), {
+      authenticationFailed: true,
+    });
+  };
+
+  beforeEach(() => {
+    instances.length = 0;
+    connectImpl.fn = async () => undefined;
+    vi.mocked(mcpLog).mockClear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    connectImpl.fn = async () => undefined; // later suites expect a server that accepts
+    vi.useRealTimers();
+  });
+
+  it('backs off for 15 minutes instead of retrying a rejected password every minute', async () => {
+    // A rejected password cannot fix itself while this process runs — the
+    // config is loaded once — and retrying it on the 60s connection-failure
+    // cadence is exactly what trips Proton Bridge's "too many login attempts"
+    // jail: 1,480 failed logins in one day from one stale account.
+    connectImpl.fn = rejectAuth;
+    const watcher = new WatcherService(config, [testAccount]);
+    await watcher.start();
+    expect(instances).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(instances).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(instances).toHaveLength(2);
+
+    await watcher.stop();
+  });
+
+  it('logs the credential remedy at error level, naming the non-interactive fix', async () => {
+    connectImpl.fn = rejectAuth;
+    const watcher = new WatcherService(config, [testAccount]);
+    await watcher.start();
+
+    const errors = vi
+      .mocked(mcpLog)
+      .mock.calls.filter(([level]) => level === 'error')
+      .map(([, , message]) => String(message));
+    expect(errors.some((m) => m.includes('email-mcp account set-secret test --stdin'))).toBe(true);
+
+    await watcher.stop();
+  });
+
+  it('still retries a plain connection failure on the short backoff', async () => {
+    connectImpl.fn = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    };
+    const watcher = new WatcherService(config, [testAccount]);
+    await watcher.start();
+    expect(instances).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(instances).toHaveLength(2);
 
     await watcher.stop();
   });
