@@ -181,7 +181,7 @@ async function main(): Promise<void> {
 
     case 'account': {
       const { default: runAccountCommand } = await import('./cli/account-commands.js');
-      await runAccountCommand(process.argv[3], process.argv[4]);
+      await runAccountCommand(process.argv[3], process.argv[4], process.argv.slice(5));
       break;
     }
 

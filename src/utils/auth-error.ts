@@ -71,7 +71,20 @@ function remedy(account: AccountConfig): string {
  */
 export function authFailureHint(err: unknown, account: AccountConfig): string | undefined {
   if (!isAuthFailure(err)) return undefined;
-  return `${remedy(account)} Update it with: email-mcp account edit ${account.name}`;
+  return `${remedy(account)} ${updateCommands(account)}`;
+}
+
+/**
+ * Both ways to replace the credential: piped (for agents, scripts, and a
+ * `pbpaste |` one-liner — nothing echoed, nothing in argv) and the
+ * interactive editor. Health output is read by agents at least as often as
+ * by a human at a TTY, so the non-TTY remedy comes first.
+ */
+function updateCommands(account: AccountConfig): string {
+  return (
+    `Update it with: email-mcp account set-secret ${account.name} --stdin (piped), ` +
+    `or interactively: email-mcp account edit ${account.name}`
+  );
 }
 
 /**
@@ -97,7 +110,7 @@ export function describeAuthFailure(
     `${protocol} authentication failed for account "${account.name}" at ${server}.`,
     remedy(account),
     `Server said: ${detail}`,
-    `Update the credential with: email-mcp account edit ${account.name}`,
+    updateCommands(account),
   ].join('\n');
 }
 

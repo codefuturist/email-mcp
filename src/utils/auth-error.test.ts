@@ -79,6 +79,9 @@ describe('describeAuthFailure', () => {
     // The server's own words survive, so a provider-specific reason is not lost.
     expect(message).toContain('535-5.7.8 Username and Password not accepted');
     expect(message).toContain('email-mcp account edit personal');
+    // Health output is read by agents and scripts as often as by a human at a
+    // TTY, so the non-interactive remedy must be in the same breath.
+    expect(message).toContain('email-mcp account set-secret personal --stdin');
   });
 
   it('names the IMAP host when the IMAP leg failed', () => {
@@ -136,6 +139,7 @@ describe('authFailureHint', () => {
 
     expect(hint).toContain('Requires an App Password');
     expect(hint).toContain('email-mcp account edit personal');
+    expect(hint).toContain('email-mcp account set-secret personal --stdin');
     // The caller's spinner line already shows these.
     expect(hint).not.toContain('smtp.gmail.com');
     expect(hint).not.toContain('535-5.7.8');

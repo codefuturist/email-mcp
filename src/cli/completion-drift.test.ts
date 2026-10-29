@@ -43,6 +43,12 @@ describe('completion spec stays in sync with the dispatch', () => {
     }
   });
 
+  it('set-secret completes its non-interactive --stdin flag', () => {
+    const account = COMMANDS.find((c) => c.name === 'account');
+    const sub = account?.subcommands?.find((s) => s.name === 'set-secret');
+    expect(sub?.flags?.map((f) => f.flag)).toContain('--stdin');
+  });
+
   it('every top-level command has a completion entry', () => {
     const real = caseLabels(read('../main.ts')).filter((c) => !TOP_LEVEL_ALIASES.has(c));
     const completed = new Set(COMMANDS.map((c) => c.name));

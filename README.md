@@ -688,17 +688,26 @@ The config file itself is always written `0600` (owner-only), and so is its
 **macOS Keychain (multi-account):** store each account's secret once —
 
 ```bash
-email-mcp account set-secret personal      # store a NEW secret (prompts; nothing echoed or in argv)
-email-mcp account migrate-secret personal  # move an EXISTING plaintext password into the keychain
+email-mcp account set-secret personal              # store a NEW secret (prompts; nothing echoed or in argv)
+pbpaste | email-mcp account set-secret personal --stdin   # same, non-interactive: read it from a pipe
+email-mcp account migrate-secret personal          # move an EXISTING plaintext password into the keychain
 ```
 
-`set-secret` prompts for the value and stores it; `migrate-secret` reads the
-account's current plaintext password from `config.toml`, stores it in the
-keychain, verifies it, then rewrites the line to `password = "keychain:personal"`.
-Either way you end up with `password = "keychain:personal"`. Each account is a separate Keychain
-item under the shared `email-mcp` service, so multiple accounts coexist.
-Secrets are read back at startup over the `security` CLI; only the service and
-account names are ever passed as arguments — the secret travels on stdout only.
+`set-secret` prompts for the value and stores it; with `--stdin` it reads the
+value from standard input instead (one trailing newline is stripped, as with
+`docker login --password-stdin`), verifies it, and rewrites the account's line
+to `password = "keychain:personal"` itself — so an agent, a provisioning
+script, or a password-manager one-liner can rotate a credential without a
+TTY. `migrate-secret` reads the account's current plaintext password from
+`config.toml`, stores it in the keychain, verifies it, then rewrites the line
+the same way. Either way you end up with `password = "keychain:personal"`.
+Each account is a separate Keychain item under the shared `email-mcp`
+service, so multiple accounts coexist. The secret never appears in a
+process's arguments: the interactive path types it into `security`'s own
+prompt, and every non-interactive path drives `security -i` over a pipe with
+the value hex-encoded. Secrets are read back at startup over the `security`
+CLI; only the service and account names are ever passed as arguments — the
+secret travels on stdout only.
 
 At rest the secret lives in your **login keychain**, encrypted and unlocked by
 your macOS login (Touch ID at the login level). A running `email-mcp` daemon

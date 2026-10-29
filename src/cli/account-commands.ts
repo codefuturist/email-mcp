@@ -39,6 +39,7 @@ import {
   storeSecretNonInteractive,
 } from './keychain-store.js';
 import { migrateAccountSecret } from './secret-migrate.js';
+import { parseSetSecretArgs, setSecretFromStdin } from './secret-set.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -867,16 +868,35 @@ async function deleteAccount(nameArg?: string): Promise<void> {
 }
 
 /**
- * Store an account's secret in the macOS Keychain and print the config line to
- * use instead of a plaintext password. The secret is typed into security's own
- * prompt (see keychain-store.ts) — it never reaches this process or argv.
+ * Store an account's secret in the OS keychain.
+ *
+ * Default: the secret is typed into security's own prompt (see
+ * keychain-store.ts) — it never reaches this process or argv — and the config
+ * line to use is printed. `--stdin`: the secret is read from a pipe, stored
+ * argv-clean, verified, and config.toml is pointed at the keychain item, so
+ * agents and scripts can rotate a credential without a TTY.
  */
-async function setSecret(name?: string): Promise<void> {
+async function setSecret(name?: string, rest: string[] = []): Promise<void> {
+  const usage = 'Usage: email-mcp account set-secret <account-name> [--stdin]';
   if (!name) {
-    console.error('Usage: email-mcp account set-secret <account-name>');
+    console.error(usage);
     process.exitCode = 1;
     return;
   }
+  let opts: ReturnType<typeof parseSetSecretArgs>;
+  try {
+    opts = parseSetSecretArgs(rest);
+  } catch (err) {
+    console.error(`${err instanceof Error ? err.message : String(err)}\n${usage}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (opts.stdin) {
+    await setSecretPiped(name);
+    return;
+  }
+
   if (process.platform !== 'darwin') {
     console.error(
       'set-secret uses the macOS Keychain (the "security" CLI) and only runs on macOS.\n' +
@@ -905,6 +925,49 @@ async function setSecret(name?: string): Promise<void> {
   console.log('Then remove any plaintext password line for this account.');
 }
 
+/** `set-secret <name> --stdin`: see secret-set.ts for the flow. */
+async function setSecretPiped(name: string): Promise<void> {
+  if (!keychainSupported()) {
+    console.error(
+      `Keychain storage is supported on macOS and Linux, not "${process.platform}".\n` +
+        'On other platforms, store the secret in an environment variable and set\n' +
+        `  password = "env:MY_VAR"\nin the account config instead.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (process.stdin.isTTY) {
+    console.error(
+      '--stdin expects the secret on standard input, e.g.\n' +
+        `  pbpaste | email-mcp account set-secret ${name} --stdin\n` +
+        `Without --stdin, set-secret prompts for it instead.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const { configUpdated } = await setSecretFromStdin(name, process.stdin);
+    console.log(
+      `✅ Stored the secret for "${name}" in the OS keychain (service "${KEYCHAIN_SERVICE}").`,
+    );
+    if (configUpdated) {
+      console.log(`   ${CONFIG_FILE} now reads: password = "${keychainRefFor(name)}"`);
+      console.log('   Restart the server for the change to take effect.');
+    } else {
+      console.log(
+        `   No password line for "${name}" in ${CONFIG_FILE} — set this account's credential to:\n` +
+          `     password = "${keychainRefFor(name)}"`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      `Failed to store the secret: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Usage + dispatch
 // ---------------------------------------------------------------------------
@@ -918,6 +981,7 @@ Subcommands:
   edit [name]       Edit an existing account
   delete [name]     Remove an account
   set-secret <name>     Store a NEW secret in the OS keychain (prompts; no plaintext)
+    --stdin             …read it from standard input instead and point config.toml at it
   migrate-secret <name> Move an existing plaintext password into the OS keychain
 
 Examples:
@@ -926,11 +990,16 @@ Examples:
   email-mcp account edit personal
   email-mcp account delete work
   email-mcp account set-secret personal
+  pbpaste | email-mcp account set-secret personal --stdin
   email-mcp account migrate-secret personal
 `);
 }
 
-export default async function runAccountCommand(subcommand?: string, arg?: string): Promise<void> {
+export default async function runAccountCommand(
+  subcommand?: string,
+  arg?: string,
+  rest: string[] = [],
+): Promise<void> {
   try {
     switch (subcommand) {
       case 'list':
@@ -951,7 +1020,7 @@ export default async function runAccountCommand(subcommand?: string, arg?: strin
         return;
       case 'set-secret':
       case 'set-password':
-        await setSecret(arg);
+        await setSecret(arg, rest);
         return;
       case 'migrate-secret':
         if (!arg) {

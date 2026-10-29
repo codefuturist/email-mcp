@@ -92,6 +92,9 @@ export const COMMANDS: CommandSpec[] = [
         name: 'set-secret',
         description: 'Store a new account secret in the OS keychain',
         arg: 'accounts',
+        flags: [
+          { flag: '--stdin', description: 'Read the secret from standard input (non-interactive)' },
+        ],
       },
       {
         name: 'migrate-secret',
