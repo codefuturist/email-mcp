@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/codefuturist-email-mcp-badge.png)](https://mseep.ai/app/codefuturist-email-mcp)
+
 # Email MCP Server
 
 [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
