@@ -106,7 +106,7 @@ archives:
 # (or any other) runtime dependency. A cask, not a `brews` formula: `brews`
 # is deprecated and fails `goreleaser check` (git-patrol stays on it only for
 # its private-repo download strategy, which this public repo doesn't need).
-# The postflight hook drops the Gatekeeper quarantine bit — the Bun binaries
+# The post-install step drops the Gatekeeper quarantine bit — the Bun binaries
 # are not signed/notarized, so without it macOS blocks the staged binary.
 # Scoped to ids: [default] to keep musl's duplicate linux archives out of
 # scope (casks only consume the darwin ones anyway).
@@ -138,17 +138,19 @@ homebrew_casks:
     hooks:
       post:
         # The Bun binaries are unsigned, so macOS quarantines the staged file
-        # and Gatekeeper refuses to run it. Guard on the OS, not on probing for
-        # xattr(1): the cask DSL's system_command is `run!`, which raises on a
-        # non-zero exit, so the old `xattr -h` probe did not degrade on Linux —
-        # it exited 127 and failed the whole install on the platform this cask
-        # advertises support for. `-dr` is a no-op (exit 0) when the attribute
+        # and Gatekeeper refuses to run it. `on_macos` is the OS guard — the
+        # cask advertises Linux support, and a bare xattr there would exit 127
+        # and fail the install. `-dr` is a no-op (exit 0) when the attribute
         # is absent, so it needs no probe of its own.
-        install: |
-          next unless OS.mac?
-
-          system_command "/usr/bin/xattr",
-                         args: ["-dr", "com.apple.quarantine", "#{staged_path}/email-mcp"]
+        # install_steps (GoReleaser >= 2.19) renders Homebrew 7's
+        # `postflight_steps`; the old `install` key rendered `postflight`,
+        # which brew now warns about on every operation. Steps run sandboxed,
+        # so the binary xattr edits is declared writable.
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/email-mcp"],
+                writable_paths: ["email-mcp"], writable_base: :staged_path
+          end
 
     # `brew uninstall --zap` only. Everything here is user data the tool wrote
     # itself: the config (which may hold an app password), the scheduler queue
