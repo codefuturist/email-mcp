@@ -69,6 +69,7 @@ describe('SmtpService', () => {
       expect(result).toEqual({
         messageId: '<test@example.com>',
         status: 'sent',
+        from: 'test@example.com',
         sentCopy: { kind: 'skipped' },
       });
       expect(transport.sendMail).toHaveBeenCalledWith(
@@ -724,5 +725,172 @@ describe('replyToEmail quote_original', () => {
     expect(call.text).toBe('On it tomorrow.');
     expect(call.text).not.toContain('wrote:');
     expect(call.text).not.toContain('>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sender identities (aliases)
+// ---------------------------------------------------------------------------
+
+describe('sender identities', () => {
+  function withIdentities(saveToSent = false) {
+    const transport = createMockTransport();
+    const connections = createMockConnectionManager(transport);
+    connections.getAccount.mockReturnValue({
+      name: 'test',
+      email: 'test@example.com',
+      fullName: 'Test User',
+      username: 'test@example.com',
+      identities: [
+        { email: 'sales@example.com', fullName: 'Sales Team', sentMailbox: 'Sales/Sent' },
+        { email: 'alias@example.org' },
+      ],
+      imap: { host: 'imap.example.com', port: 993, tls: true, starttls: false, verifySsl: true },
+      smtp: { host: 'smtp.example.com', port: 465, tls: true, starttls: false, verifySsl: true },
+    });
+    const rateLimiter = createMockRateLimiter(true);
+    const imap = {
+      appendToSent: vi.fn().mockResolvedValue({ kind: 'filed', path: 'Sent' }),
+      getEmail: vi.fn().mockResolvedValue({
+        subject: 'Question',
+        messageId: '<orig@x>',
+        from: { address: 'them@x.test' },
+        to: [{ address: 'sales@example.com' }, { address: 'other@x.test' }],
+        cc: [{ address: 'alias@example.org' }, { address: 'test@example.com' }],
+        references: [],
+        date: 'Mon, 25 May 2026 16:11:00 +0200',
+        bodyText: 'Hello',
+        attachments: [],
+        headers: {},
+      }),
+      fetchDraft: vi.fn(),
+      deleteDraft: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new SmtpService(connections, rateLimiter, imap as unknown as ImapService, {
+      saveToSent,
+    });
+    return { service, imap, transport, rateLimiter };
+  }
+
+  const mail = { to: ['a@b.c'], subject: 'S', body: 'B' };
+
+  it('sendEmail sends as a configured alias, with its display name', async () => {
+    const { service, transport } = withIdentities();
+    const result = await service.sendEmail('test', { ...mail, from: 'SALES@example.com' });
+
+    expect(transport.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ from: '"Sales Team" <sales@example.com>' }),
+    );
+    expect(result.from).toBe('sales@example.com');
+  });
+
+  it('sendEmail uses the bare alias address when the alias has no display name', async () => {
+    const { service, transport } = withIdentities();
+    await service.sendEmail('test', { ...mail, from: 'alias@example.org' });
+    expect(transport.sendMail.mock.calls[0]![0].from).toBe('alias@example.org');
+  });
+
+  // Free-form From would make the server a spoofing tool.
+  it('rejects an unconfigured from before sending or charging the rate limit', async () => {
+    const { service, transport, rateLimiter } = withIdentities();
+    await expect(service.sendEmail('test', { ...mail, from: 'boss@example.com' })).rejects.toThrow(
+      'not a sender identity',
+    );
+    expect(transport.sendMail).not.toHaveBeenCalled();
+    expect(rateLimiter.tryConsume).not.toHaveBeenCalled();
+  });
+
+  it('forwardEmail and replyToEmail reject an unconfigured from too', async () => {
+    const { service, transport } = withIdentities();
+    await expect(
+      service.forwardEmail('test', { emailId: '1', to: ['a@b.c'], from: 'x@evil.test' }),
+    ).rejects.toThrow('not a sender identity');
+    await expect(
+      service.replyToEmail('test', { emailId: '1', body: 'b', from: 'x@evil.test' }),
+    ).rejects.toThrow('not a sender identity');
+    expect(transport.sendMail).not.toHaveBeenCalled();
+  });
+
+  it('replyToEmail defaults to the identity the original was addressed to', async () => {
+    const { service, transport } = withIdentities();
+    const result = await service.replyToEmail('test', { emailId: '7', body: 'answer' });
+
+    expect(transport.sendMail.mock.calls[0]![0].from).toBe('"Sales Team" <sales@example.com>');
+    expect(result.from).toBe('sales@example.com');
+  });
+
+  it('replyToEmail honours an explicit from over the detected identity', async () => {
+    const { service, transport } = withIdentities();
+    await service.replyToEmail('test', { emailId: '7', body: 'answer', from: 'test@example.com' });
+    expect(transport.sendMail.mock.calls[0]![0].from).toBe('"Test User" <test@example.com>');
+  });
+
+  // Reply-all from one alias must not copy in the account's other addresses.
+  it('replyToEmail with replyAll leaves out every one of our own identities', async () => {
+    const { service, transport } = withIdentities();
+    await service.replyToEmail('test', { emailId: '7', body: 'answer', replyAll: true });
+
+    const payload = transport.sendMail.mock.calls[0]![0];
+    expect(payload.to).toBe('them@x.test, other@x.test');
+    expect(payload.cc).toBeUndefined();
+  });
+
+  it('forwardEmail sends as the requested alias', async () => {
+    const { service, transport } = withIdentities();
+    await service.forwardEmail('test', {
+      emailId: '1',
+      to: ['a@b.c'],
+      from: 'alias@example.org',
+      includeAttachments: false,
+    });
+    expect(transport.sendMail.mock.calls[0]![0].from).toBe('alias@example.org');
+  });
+
+  it("files the Sent copy in the identity's own sent_mailbox", async () => {
+    const { service, imap } = withIdentities(true);
+    await service.sendEmail('test', { ...mail, from: 'sales@example.com' });
+    expect(imap.appendToSent).toHaveBeenCalledWith('test', expect.any(Buffer), {
+      mailbox: 'Sales/Sent',
+    });
+  });
+
+  it("leaves the account's Sent folder resolution alone for an identity without one", async () => {
+    const { service, imap } = withIdentities(true);
+    await service.sendEmail('test', { ...mail, from: 'alias@example.org' });
+    expect(imap.appendToSent).toHaveBeenCalledWith('test', expect.any(Buffer), {});
+  });
+
+  it('sendDraft keeps the alias the draft was saved as', async () => {
+    const { service, imap, transport } = withIdentities();
+    imap.fetchDraft.mockResolvedValue({
+      email: {
+        from: { address: 'Sales@example.com' },
+        to: [{ address: 'a@b.c' }],
+        subject: 'Draft',
+        bodyText: 'text',
+        references: [],
+      },
+      mailbox: 'Drafts',
+    });
+    const result = await service.sendDraft('test', 3);
+    expect(transport.sendMail.mock.calls[0]![0].from).toBe('"Sales Team" <sales@example.com>');
+    expect(result.from).toBe('sales@example.com');
+  });
+
+  // A draft edited elsewhere could carry any From — it is not sent as written.
+  it('sendDraft falls back to the account address for a From that is not ours', async () => {
+    const { service, imap, transport } = withIdentities();
+    imap.fetchDraft.mockResolvedValue({
+      email: {
+        from: { address: 'someone@else.test' },
+        to: [{ address: 'a@b.c' }],
+        subject: 'Draft',
+        bodyText: 'text',
+        references: [],
+      },
+      mailbox: 'Drafts',
+    });
+    await service.sendDraft('test', 3);
+    expect(transport.sendMail.mock.calls[0]![0].from).toBe('"Test User" <test@example.com>');
   });
 });

@@ -61,6 +61,19 @@ function sentCopyNote(sentCopy: SentCopyResult | undefined): string {
   return '';
 }
 
+/**
+ * Optional sender identity. Shared by the send tools so the wording — and the
+ * rule that only configured identities pass — stays the same everywhere.
+ */
+export const fromInputSchema = z
+  .string()
+  .email()
+  .optional()
+  .describe(
+    "Send as this address: the account's own email or one of its configured identities " +
+      '(list_accounts shows them). Any other address is rejected. Default: the account email.',
+  );
+
 /** Attachment caps the send tools enforce (resolved per account at call time). */
 export interface SendLimit {
   /** Global `[settings.send]` cap, used in tool descriptions. */
@@ -81,9 +94,11 @@ export default function registerSendTools(
     'send_email',
     {
       title: 'Send email',
-      description: 'Send a new email. Supports plain text or HTML body, CC, and BCC.',
+      description:
+        'Send a new email. Supports plain text or HTML body, CC, and BCC, and sending as a configured alias (from).',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: fromInputSchema,
         to: z.array(z.string().email()).min(1).describe('Recipient email addresses'),
         subject: z.string().describe('Email subject'),
         body: z.string().describe('Email body content'),
@@ -113,14 +128,14 @@ export default function registerSendTools(
         await audit.log(
           'send_email',
           params.account,
-          { to: params.to, subject: params.subject },
+          { to: params.to, subject: params.subject, from: result.from },
           'ok',
         );
         return {
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email sent successfully!\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}\nMessage-ID: ${result.messageId}${attachmentReport(prepared)}${sentCopyNote(result.sentCopy)}`,
+              text: `✅ Email sent successfully!\nFrom: ${result.from}\nTo: ${params.to.join(', ')}\nSubject: ${params.subject}\nMessage-ID: ${result.messageId}${attachmentReport(prepared)}${sentCopyNote(result.sentCopy)}`,
             },
           ],
         };
@@ -155,9 +170,18 @@ export default function registerSendTools(
       title: 'Reply email',
       description:
         'Reply to an email with proper threading (In-Reply-To & References headers). Use get_email first to read the original. ' +
-        'The original message is quoted below the reply by default (Thunderbird/Outlook style) — set quoteOriginal=false for the bare body only.',
+        'The original message is quoted below the reply by default (Thunderbird/Outlook style) — set quoteOriginal=false for the bare body only. ' +
+        'Sends from the identity the original was addressed to unless from is given.',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: z
+          .string()
+          .email()
+          .optional()
+          .describe(
+            "Send as this address: the account's own email or one of its configured identities. " +
+              'Default: the identity the original was addressed to (To, Cc, then delivery headers), else the account email.',
+          ),
         emailId: z.string().describe('Email ID to reply to (from list_emails or get_email)'),
         mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
         body: z.string().describe('Reply body content'),
@@ -193,14 +217,14 @@ export default function registerSendTools(
         await audit.log(
           'reply_email',
           params.account,
-          { emailId: params.emailId, mailbox: params.mailbox },
+          { emailId: params.emailId, mailbox: params.mailbox, from: result.from },
           'ok',
         );
         return {
           content: [
             {
               type: 'text' as const,
-              text: `✅ Reply sent successfully!\nMessage-ID: ${result.messageId}${attachmentReport(prepared)}${sentCopyNote(result.sentCopy)}`,
+              text: `✅ Reply sent successfully!\nFrom: ${result.from}\nMessage-ID: ${result.messageId}${attachmentReport(prepared)}${sentCopyNote(result.sentCopy)}`,
             },
           ],
         };
@@ -240,6 +264,7 @@ export default function registerSendTools(
         'HTML in a blockquote.',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: fromInputSchema,
         emailId: z.string().describe('Email ID to forward (from list_emails or get_email)'),
         mailbox: z.string().default('INBOX').describe('Mailbox where the original email is'),
         to: z.array(z.string().email()).min(1).describe('Forward to these recipients'),
@@ -264,14 +289,14 @@ export default function registerSendTools(
         await audit.log(
           'forward_email',
           params.account,
-          { to: params.to, emailId: params.emailId },
+          { to: params.to, emailId: params.emailId, from: result.from },
           'ok',
         );
         return {
           content: [
             {
               type: 'text' as const,
-              text: `✅ Email forwarded successfully!\nTo: ${params.to.join(', ')}\nMessage-ID: ${result.messageId}${params.includeAttachments === false ? '\n(original attachments not included)' : ''}${sentCopyNote(result.sentCopy)}`,
+              text: `✅ Email forwarded successfully!\nFrom: ${result.from}\nTo: ${params.to.join(', ')}\nMessage-ID: ${result.messageId}${params.includeAttachments === false ? '\n(original attachments not included)' : ''}${sentCopyNote(result.sentCopy)}`,
             },
           ],
         };

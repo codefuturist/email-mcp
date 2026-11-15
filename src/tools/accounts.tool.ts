@@ -15,7 +15,7 @@ export default function registerAccountsTools(
     {
       title: 'List accounts',
       description:
-        'List all configured email accounts. Call this first to discover available account names for use with other tools.',
+        'List all configured email accounts and the extra sender identities (aliases) each may send as. Call this first to discover available account names for use with other tools.',
       annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async () => {
@@ -26,6 +26,7 @@ export default function registerAccountsTools(
           name: cfg.name,
           email: cfg.email,
           fullName: cfg.fullName ?? null,
+          identities: cfg.identities ?? [],
         };
       });
 
@@ -36,7 +37,17 @@ export default function registerAccountsTools(
             text:
               accounts.length > 0
                 ? accounts
-                    .map((a) => `• ${a.name}: ${a.email}${a.fullName ? ` (${a.fullName})` : ''}`)
+                    .map(
+                      (a) =>
+                        `• ${a.name}: ${a.email}${a.fullName ? ` (${a.fullName})` : ''}` +
+                        // Aliases the send tools accept as `from`.
+                        a.identities
+                          .map(
+                            (i) =>
+                              `\n    also sends as: ${i.email}${i.fullName ? ` (${i.fullName})` : ''}`,
+                          )
+                          .join(''),
+                    )
                     .join('\n')
                 : 'No accounts configured.',
           },

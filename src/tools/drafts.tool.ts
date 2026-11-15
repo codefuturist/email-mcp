@@ -9,6 +9,7 @@ import audit from '../safety/audit.js';
 import type ImapService from '../services/imap.service.js';
 import type SmtpService from '../services/smtp.service.js';
 import type { SentCopyResult } from '../types/index.js';
+import { fromInputSchema } from './send.tool.js';
 
 /** See send.tool.ts's identical helper — kept local to avoid a cross-tool-file import. */
 function sentCopyNote(sentCopy: SentCopyResult | undefined): string {
@@ -33,6 +34,10 @@ export default function registerDraftTools(
         'Save an email draft to the Drafts folder. Compose over time, then use send_draft to send it. Use list_emails with the Drafts mailbox to see saved drafts.',
       inputSchema: z.object({
         account: z.string().describe('Account name from list_accounts'),
+        from: fromInputSchema.describe(
+          "Draft as this address: the account's own email or one of its configured identities. " +
+            'send_draft keeps it. Default: the account email.',
+        ),
         to: z
           .array(z.string().email())
           .default([])
@@ -52,9 +57,21 @@ export default function registerDraftTools(
       }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    async ({ account, to, subject, body, cc, bcc, html, in_reply_to: inReplyTo, references }) => {
+    async ({
+      account,
+      from,
+      to,
+      subject,
+      body,
+      cc,
+      bcc,
+      html,
+      in_reply_to: inReplyTo,
+      references,
+    }) => {
       try {
         const result = await imapService.saveDraft(account, {
+          from,
           to,
           subject,
           body,

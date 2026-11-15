@@ -19,6 +19,23 @@ function fullRaw(overrides?: (raw: RawAppConfig) => void): RawAppConfig {
 }
 
 describe('findUnknownKeys', () => {
+  it('knows the [[accounts.identities]] keys and flags a typo inside one', () => {
+    const account = {
+      name: 'personal',
+      email: 'user@example.com',
+      password: 'secret',
+      imap: { host: 'imap.example.com' },
+      smtp: { host: 'smtp.example.com' },
+      identities: [
+        { email: 'alias@example.com', full_name: 'Alias', sent_mailbox: 'Sent/Alias' },
+        { email: 'other@example.com', sent_mailbx: 'Sent' },
+      ],
+    };
+    expect(findUnknownKeys({ accounts: [account] })).toEqual([
+      { path: 'accounts[0].identities[1].sent_mailbx', suggestion: 'sent_mailbox' },
+    ]);
+  });
+
   it('accepts a fully populated valid config with every optional set', () => {
     const raw = {
       settings: {

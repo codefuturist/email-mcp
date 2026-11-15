@@ -19,6 +19,7 @@ export default function registerAccountsResource(
       name: cfg.name,
       email: cfg.email,
       fullName: cfg.fullName ?? undefined,
+      identities: cfg.identities?.map((i) => ({ email: i.email, fullName: i.fullName })),
     };
   });
 

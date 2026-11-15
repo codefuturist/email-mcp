@@ -59,6 +59,14 @@ export interface OAuth2Config {
   scopes?: string[];
 }
 
+/** An address an account may send as — its own, or a configured alias. */
+export interface SenderIdentity {
+  email: string;
+  fullName?: string;
+  /** Sent folder for mail from this identity; falls back to the account's. */
+  sentMailbox?: string;
+}
+
 export interface AccountConfig {
   name: string;
   email: string;
@@ -82,6 +90,11 @@ export interface AccountConfig {
    * guess.
    */
   saveToSent?: boolean;
+  /**
+   * Further addresses this login may send as (provider aliases). Only these
+   * and the account's own `email` are accepted as a `from` by the send tools.
+   */
+  identities?: SenderIdentity[];
   imap: ImapConfig;
   smtp: SmtpConfig;
 }
@@ -334,6 +347,8 @@ export type SentCopyResult =
 
 export interface SendResult {
   messageId: string;
+  /** The From: address the message went out with. */
+  from?: string;
   status: 'sent' | 'failed';
   sentCopy?: SentCopyResult;
 }
