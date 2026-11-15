@@ -46,6 +46,7 @@ import { stripHtml } from '../utils/html.js';
 import { imapCommand } from '../utils/imap-error.js';
 import type { ReconnectEvent } from './event-bus.js';
 import eventBus from './event-bus.js';
+import { resolveIdentity } from './identities.js';
 import type { LabelStrategy } from './label-strategy.js';
 import { detectLabelStrategy } from './label-strategy.js';
 import {
@@ -1514,6 +1515,8 @@ export default class ImapService {
       html?: boolean;
       inReplyTo?: string;
       references?: string[];
+      /** Sender identity (account email or a configured alias); default: the account's. */
+      from?: string;
     },
   ): Promise<{ id: number; mailbox: string }> {
     // Validate before touching the network: every one of these is spliced
@@ -1525,8 +1528,11 @@ export default class ImapService {
     if (options.inReplyTo) assertNoCrlf(options.inReplyTo, 'In-Reply-To');
     for (const ref of options.references ?? []) assertNoCrlf(ref, 'References entry');
 
-    const client = await this.connections.getImapClient(accountName);
     const account = this.connections.getAccount(accountName);
+    // Before connecting: an address outside the configured identities is
+    // rejected rather than written into From:.
+    const sender = resolveIdentity(account, options.from);
+    const client = await this.connections.getImapClient(accountName);
 
     // Find the Drafts folder
     const mailboxes = await client.list();
@@ -1537,7 +1543,7 @@ export default class ImapService {
     // non-ASCII in the subject or display name becomes an RFC 2047 encoded
     // word; encodeWords leaves a pure-ASCII value untouched.
     const headers = [
-      `From: ${formatFromHeader(account.fullName, account.email)}`,
+      `From: ${formatFromHeader(sender.fullName, sender.email)}`,
       `To: ${options.to.join(', ')}`,
       `Subject: ${libmime.encodeWords(options.subject)}`,
       `Date: ${new Date().toUTCString()}`,
@@ -1620,15 +1626,18 @@ export default class ImapService {
   /**
    * Resolve the folder `appendToSent` should file into.
    *
-   * `sentMailbox` settles it outright for a mailbox that carries several
-   * sent-shaped folders (a leftover `Sent` beside the server's actual
-   * `\Sent`-flagged one). Otherwise prefer the folder the server
-   * designates, then one plainly named "Sent", whatever its case.
+   * An explicit `override` (a sender identity's own `sent_mailbox`) wins,
+   * then the account's `sentMailbox`, which settles it for a mailbox that
+   * carries several sent-shaped folders (a leftover `Sent` beside the
+   * server's actual `\Sent`-flagged one). Otherwise prefer the folder the
+   * server designates, then one plainly named "Sent", whatever its case.
    */
   private static async resolveSentFolder(
     client: ImapFlow,
     account: AccountConfig,
+    override?: string,
   ): Promise<string> {
+    if (override) return override;
     if (account.sentMailbox) return account.sentMailbox;
 
     const mailboxes = await client.list();
@@ -1674,7 +1683,11 @@ export default class ImapService {
    * instead — treating it as a send failure would be worse than the
    * original problem, and would invite a duplicate send.
    */
-  async appendToSent(accountName: string, raw: Buffer): Promise<SentCopyResult> {
+  async appendToSent(
+    accountName: string,
+    raw: Buffer,
+    options: { mailbox?: string } = {},
+  ): Promise<SentCopyResult> {
     const client = await this.connections.getImapClient(accountName);
     const account = this.connections.getAccount(accountName);
 
@@ -1683,7 +1696,7 @@ export default class ImapService {
     }
 
     try {
-      const target = await ImapService.resolveSentFolder(client, account);
+      const target = await ImapService.resolveSentFolder(client, account, options.mailbox);
       // \Seen: the user wrote it, so it is not unread mail.
       await imapCommand(`Appending a sent copy to "${target}"`, () =>
         client.append(target, raw, ['\\Seen']),

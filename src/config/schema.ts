@@ -46,6 +46,17 @@ export const OAuth2ConfigSchema = z.object({
   scopes: z.array(z.string()).optional(),
 });
 
+/**
+ * An extra address the account's login may send as (a provider alias).
+ * Only listed identities are accepted as a `from` — no free-form sender.
+ */
+const IdentityConfigSchema = z.object({
+  email: z.string().email('Invalid identity email address'),
+  full_name: z.string().optional(),
+  /** Sent folder for mail from this identity; falls back to the account's `sent_mailbox`. */
+  sent_mailbox: z.string().optional(),
+});
+
 export const AccountConfigSchema = z
   .object({
     name: z.string().min(1, 'Account name is required'),
@@ -66,6 +77,8 @@ export const AccountConfigSchema = z
     sent_mailbox: z.string().optional(),
     /** Per-account override of the Sent-copy default (see appendToSent). */
     save_to_sent: z.boolean().optional(),
+    /** Aliases this login may send as, via the send tools' `from` parameter. */
+    identities: z.array(IdentityConfigSchema).optional(),
   })
   .refine((data) => data.password ?? data.oauth2, {
     message: 'Either password or oauth2 config is required',

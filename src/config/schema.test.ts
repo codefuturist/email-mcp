@@ -107,6 +107,27 @@ describe('AccountConfigSchema', () => {
   it('rejects missing smtp', () => {
     expect(() => AccountConfigSchema.parse({ ...validAccount(), smtp: undefined })).toThrow();
   });
+
+  it('accepts sender identities with optional name and Sent folder', () => {
+    const result = AccountConfigSchema.parse(
+      validAccount({
+        identities: [
+          { email: 'alias@example.com', full_name: 'Alias', sent_mailbox: 'Sent/Alias' },
+          { email: 'other@example.com' },
+        ],
+      }),
+    );
+    expect(result.identities).toEqual([
+      { email: 'alias@example.com', full_name: 'Alias', sent_mailbox: 'Sent/Alias' },
+      { email: 'other@example.com' },
+    ]);
+  });
+
+  it('rejects an identity with an invalid email', () => {
+    expect(() =>
+      AccountConfigSchema.parse(validAccount({ identities: [{ email: 'nope' }] })),
+    ).toThrow();
+  });
 });
 
 describe('SettingsSchema', () => {

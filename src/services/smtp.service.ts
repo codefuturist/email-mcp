@@ -10,10 +10,18 @@ import type { IConnectionManager } from '../connections/types.js';
 import { mcpLog } from '../logging.js';
 import type RateLimiter from '../safety/rate-limiter.js';
 import { sanitizeTemplateVariable } from '../safety/validation.js';
-import type { SendResult, SentCopyResult } from '../types/index.js';
+import type { SenderIdentity, SendResult, SentCopyResult } from '../types/index.js';
 import { stripHtml } from '../utils/html.js';
 import { quoteOriginalAsHtml, quoteOriginalAsText } from '../utils/quote.js';
 import type { PreparedAttachment } from './attachments.js';
+import {
+  findIdentity,
+  formatSender,
+  identityForReply,
+  isOwnAddress,
+  primaryIdentity,
+  resolveIdentity,
+} from './identities.js';
 import type ImapService from './imap.service.js';
 
 /** Per-file ceiling when re-fetching originals for a forward. */
@@ -76,6 +84,7 @@ export default class SmtpService {
     accountName: string,
     mail: Record<string, unknown>,
     messageId: string | undefined,
+    sender: SenderIdentity,
   ): Promise<SentCopyResult> {
     if (!this.saveToSent) return { kind: 'skipped' };
 
@@ -84,7 +93,13 @@ export default class SmtpService {
       const raw = await new MailComposer({ ...mail, ...(messageId ? { messageId } : {}) })
         .compile()
         .build();
-      result = await this.imapService.appendToSent(accountName, raw);
+      // An alias with its own Sent folder files there; otherwise the
+      // account's folder resolution applies unchanged.
+      result = await this.imapService.appendToSent(
+        accountName,
+        raw,
+        sender.sentMailbox ? { mailbox: sender.sentMailbox } : {},
+      );
     } catch (err) {
       result = { kind: 'failed', error: err instanceof Error ? err.message : String(err) };
     }
@@ -116,15 +131,19 @@ export default class SmtpService {
       /** Threading headers — a scheduled reply keeps its place in the thread. */
       inReplyTo?: string;
       references?: string[];
+      /** Sender identity (account email or a configured alias); default: the account's. */
+      from?: string;
     },
   ): Promise<SendResult> {
+    const account = this.connections.getAccount(accountName);
+    // Resolved before the rate limit is charged: a rejected sender sends nothing.
+    const sender = resolveIdentity(account, options.from);
     this.checkRateLimit(accountName);
 
-    const account = this.connections.getAccount(accountName);
     const transport = await this.connections.getSmtpTransport(accountName);
 
     const mail = {
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: formatSender(sender),
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       bcc: options.bcc?.join(', '),
@@ -142,11 +161,12 @@ export default class SmtpService {
     };
 
     const result = await transport.sendMail(mail);
-    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId);
+    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId, sender);
 
     return {
       messageId: result.messageId ?? '',
       status: 'sent',
+      from: sender.email,
       sentCopy,
     };
   }
@@ -171,27 +191,36 @@ export default class SmtpService {
        * replies). Set false to send the bare reply body only.
        */
       quoteOriginal?: boolean;
+      /**
+       * Sender identity. Default: the identity the original was addressed to
+       * (see `identityForReply`), else the account's own.
+       */
+      from?: string;
     },
   ): Promise<SendResult> {
+    const account = this.connections.getAccount(accountName);
+    const explicitSender =
+      options.from !== undefined ? resolveIdentity(account, options.from) : undefined;
     this.checkRateLimit(accountName);
 
-    const account = this.connections.getAccount(accountName);
     const original = await this.imapService.getEmail(accountName, options.emailId, options.mailbox);
+    const sender = explicitSender ?? identityForReply(account, original);
 
     // Build recipient list
     const to = [original.from.address];
     const cc: string[] = [];
 
     if (options.replyAll) {
-      // Add all original To recipients except ourselves
+      // Add all original To recipients except ourselves — any of our
+      // identities, or reply-all from one alias would copy in the other.
       original.to
-        .filter((addr) => addr.address !== account.email)
+        .filter((addr) => !isOwnAddress(account, addr.address))
         .forEach((addr) => {
           to.push(addr.address);
         });
       // Add CC recipients except ourselves
       (original.cc ?? [])
-        .filter((addr) => addr.address !== account.email)
+        .filter((addr) => !isOwnAddress(account, addr.address))
         .forEach((addr) => {
           cc.push(addr.address);
         });
@@ -220,7 +249,7 @@ export default class SmtpService {
     const transport = await this.connections.getSmtpTransport(accountName);
 
     const mail = {
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: formatSender(sender),
       to: to.join(', '),
       cc: cc.length > 0 ? cc.join(', ') : undefined,
       subject,
@@ -235,11 +264,12 @@ export default class SmtpService {
     };
 
     const result = await transport.sendMail(mail);
-    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId);
+    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId, sender);
 
     return {
       messageId: result.messageId ?? '',
       status: 'sent',
+      from: sender.email,
       sentCopy,
     };
   }
@@ -258,11 +288,14 @@ export default class SmtpService {
       cc?: string[];
       includeAttachments?: boolean;
       html?: boolean;
+      /** Sender identity (account email or a configured alias); default: the account's. */
+      from?: string;
     },
   ): Promise<SendResult> {
+    const account = this.connections.getAccount(accountName);
+    const sender = resolveIdentity(account, options.from);
     this.checkRateLimit(accountName);
 
-    const account = this.connections.getAccount(accountName);
     const original = await this.imapService.getEmail(accountName, options.emailId, options.mailbox);
 
     // Carry the original's attachments unless explicitly declined -- a forward
@@ -356,7 +389,7 @@ export default class SmtpService {
     const transport = await this.connections.getSmtpTransport(accountName);
 
     const mail = {
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: formatSender(sender),
       to: options.to.join(', '),
       cc: options.cc?.join(', '),
       subject,
@@ -366,11 +399,12 @@ export default class SmtpService {
     };
 
     const result = await transport.sendMail(mail);
-    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId);
+    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId, sender);
 
     return {
       messageId: result.messageId ?? '',
       status: 'sent',
+      from: sender.email,
       sentCopy,
     };
   }
@@ -408,8 +442,13 @@ export default class SmtpService {
     const to = draft.to.map((a) => a.address).join(', ');
     const cc = draft.cc?.map((a) => a.address).join(', ');
 
+    // A draft saved as an alias goes out as that alias. A From: that is not
+    // one of our identities (edited in another client) falls back to the
+    // account's own address rather than being sent as written.
+    const sender = findIdentity(account, draft.from?.address) ?? primaryIdentity(account);
+
     const mail = {
-      from: account.fullName ? `"${account.fullName}" <${account.email}>` : account.email,
+      from: formatSender(sender),
       to,
       cc,
       subject: draft.subject,
@@ -421,7 +460,7 @@ export default class SmtpService {
     };
 
     const result = await transport.sendMail(mail);
-    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId);
+    const sentCopy = await this.fileCopyInSent(accountName, mail, result.messageId, sender);
 
     // Delete the draft after a successful send — unless the Sent-copy APPEND
     // failed. The copy would otherwise disappear entirely: the draft gone,
@@ -434,6 +473,7 @@ export default class SmtpService {
     return {
       messageId: result.messageId ?? '',
       status: 'sent',
+      from: sender.email,
       sentCopy,
     };
   }

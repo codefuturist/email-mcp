@@ -652,6 +652,12 @@ password = "keychain:personal"  # or "env:VAR", or a plaintext app password
 # sent_mailbox = "INBOX.Sent Messages"  # optional, see "Sent-folder copies" below
 # save_to_sent = true                    # optional per-account override of the Gmail-skip guess
 
+# Optional: aliases this login may send as — see "Sender identities" below
+# [[accounts.identities]]
+# email = "alias@example.com"
+# full_name = "Your Name"
+# sent_mailbox = "Sent/Alias"  # optional; defaults to the account's Sent folder
+
 [accounts.imap]
 host = "imap.gmail.com"
 port = 993
@@ -1214,6 +1220,37 @@ report the outcome in their result's `sentCopy` field: `{kind: "filed", path}`,
 `{kind: "skipped"}` (setting off, or Gmail's own capture), or
 `{kind: "failed", error}`.
 
+**Sender identities (aliases).** Many providers let one login send from
+several addresses (Outlook.com aliases, Gmail "Send mail as", Fastmail or
+self-hosted aliases). List them under the account and pass one as `from`:
+
+```toml
+[[accounts.identities]]
+email = "sales@example.com"
+full_name = "Example Sales"
+sent_mailbox = "Sales/Sent"   # optional: file this identity's sent copies here
+
+[[accounts.identities]]
+email = "me@example.org"
+```
+
+`send_email`, `reply_email`, `forward_email` and `save_draft` take an optional
+`from`; `send_draft` keeps the From the draft was saved with. Only the
+account's own `email` and its listed identities are accepted — any other
+address is rejected before anything is sent, so the server cannot be used to
+forge a sender. `list_accounts` shows each account's identities.
+
+`reply_email` without `from` answers from the identity the original was
+addressed to, the way Thunderbird for Android/K-9 Mail does: it checks `To`,
+then `Cc`, then the `X-Original-To`, `Delivered-To` and `X-Envelope-To`
+headers, and falls back to the account's own address. Reply-all leaves out
+all of the account's identities, not just the primary address.
+
+With `save_to_sent` on, a message sent as an identity with its own
+`sent_mailbox` is filed there; otherwise the account's Sent folder applies.
+The provider must allow the login to send as the address — this setting
+only decides what the server puts in From, it does not grant the right.
+
 Outbound HTML (`html: true`) is sent as `multipart/alternative` with a
 generated plain-text alternative. Forwards quote the original as converted
 text; pass `html: true` to `forward_email` to also carry the original HTML.
@@ -1222,7 +1259,7 @@ text; pass `html: true` to `forward_email` to also carry the original HTML.
 
 | Tool | Description |
 |------|-------------|
-| `list_accounts` | List all configured email accounts |
+| `list_accounts` | List all configured email accounts and their sender identities |
 | `list_mailboxes` | List folders with unread counts and special-use flags |
 | `list_emails` | Paginated email listing with date, sender, subject, and flag filters; marks bulk mail; optional body preview |
 | `get_email` | Read full email content with attachment metadata and bulk-mail classification (HTML converted to readable text by default) |
@@ -1283,7 +1320,7 @@ residue is omitted: **no preview beats a misleading one**.
 
 | Tool | Description |
 |------|-------------|
-| `send_email` | Send a new email (plain text or HTML, CC/BCC) |
+| `send_email` | Send a new email (plain text or HTML, CC/BCC, optional alias `from`) |
 | `reply_email` | Reply with proper threading (In-Reply-To, References) |
 | `forward_email` | Forward with original content quoted |
 | `save_draft` | Save an email draft to the Drafts folder |

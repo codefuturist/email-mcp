@@ -1027,6 +1027,32 @@ describe('ImapService', () => {
   // -----------------------------------------------------------------------
 
   describe('saveDraft', () => {
+    it('writes a configured alias into From when one is requested', async () => {
+      client.list.mockResolvedValue([{ path: 'Drafts', specialUse: '\\Drafts' }]);
+      connections.getAccount.mockReturnValue({
+        name: 'test',
+        email: 'test@example.com',
+        identities: [{ email: 'alias@example.com', fullName: 'Alias Name' }],
+      });
+
+      await service.saveDraft('test', {
+        from: 'alias@example.com',
+        to: ['a@b.c'],
+        subject: 'hi',
+        body: 'draft body',
+      });
+
+      const message = (client.append.mock.calls[0]![1] as Buffer).toString('utf-8');
+      expect(message).toContain('From: "Alias Name" <alias@example.com>');
+    });
+
+    it('refuses an unconfigured From without touching the server', async () => {
+      await expect(
+        service.saveDraft('test', { from: 'x@evil.test', to: [], subject: 's', body: 'b' }),
+      ).rejects.toThrow('not a sender identity');
+      expect(client.append).not.toHaveBeenCalled();
+    });
+
     it('writes In-Reply-To and a folded References header', async () => {
       client.list.mockResolvedValue([{ path: 'Drafts', specialUse: '\\Drafts' }]);
 
@@ -1244,6 +1270,20 @@ describe('ImapService', () => {
       expect(client.append).toHaveBeenCalledWith('INBOX.Sent Messages', expect.any(Buffer), [
         '\\Seen',
       ]);
+      expect(client.list).not.toHaveBeenCalled();
+    });
+
+    it("files into an identity's own Sent folder ahead of the account's", async () => {
+      connections.getAccount.mockReturnValue({
+        name: 'test',
+        sentMailbox: 'INBOX.Sent Messages',
+      });
+
+      const result = await service.appendToSent('test', Buffer.from('raw'), {
+        mailbox: 'Sales/Sent',
+      });
+
+      expect(result).toEqual({ kind: 'filed', path: 'Sales/Sent' });
       expect(client.list).not.toHaveBeenCalled();
     });
 

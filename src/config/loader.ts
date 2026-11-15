@@ -282,6 +282,11 @@ function normalizeAccount(raw: RawAccountConfig): AccountConfig {
     maxAttachmentMb: raw.max_attachment_mb,
     sentMailbox: raw.sent_mailbox,
     saveToSent: raw.save_to_sent,
+    identities: raw.identities?.map((identity) => ({
+      email: identity.email,
+      fullName: identity.full_name,
+      sentMailbox: identity.sent_mailbox,
+    })),
     imap: {
       host: raw.imap.host,
       port: raw.imap.port,
@@ -686,6 +691,13 @@ password = "your-app-password"
 # Per-account attachment cap (MB, base64-encoded total). Overrides the global
 # [settings.send] cap and the provider's documented limit for this account.
 # max_attachment_mb = 25
+
+# Aliases this login may send as (pass one as \`from\` to the send tools).
+# Replies default to the alias the original was addressed to.
+# [[accounts.identities]]
+# email = "alias@example.com"
+# full_name = "Your Name"
+# sent_mailbox = "Sent/Alias"   # optional; defaults to the account's Sent folder
 
 [accounts.imap]
 host = "imap.example.com"
