@@ -19,3 +19,18 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+
+  # The Dockerfiles pin an exact Node base image so a rebuild cannot silently
+  # move to a different patch level. That pin is only safe if it is kept
+  # current, otherwise the image freezes on a release with open advisories.
+  - package-ecosystem: docker
+    directories:
+      - /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      node-base-images:
+        patterns:
+          - "*"
