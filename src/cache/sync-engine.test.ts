@@ -100,7 +100,7 @@ describe('SyncEngine', () => {
   // Capability tiers
   // -------------------------------------------------------------------------
 
-  describe('tier detection', () => {
+  describe('tier detection', async () => {
     it('uses qresync when the server advertises it', async () => {
       engine = build(['QRESYNC', 'CONDSTORE']);
       expect(await engine.detectTier('work')).toBe('qresync');
@@ -162,7 +162,7 @@ describe('SyncEngine', () => {
   // UIDVALIDITY epoch
   // -------------------------------------------------------------------------
 
-  describe('UIDVALIDITY epoch', () => {
+  describe('UIDVALIDITY epoch', async () => {
     it('records the epoch on first sync', async () => {
       engine = build();
       client.search.mockResolvedValue([]);
@@ -235,7 +235,7 @@ describe('SyncEngine', () => {
   // Baseline tier
   // -------------------------------------------------------------------------
 
-  describe('baseline tier', () => {
+  describe('baseline tier', async () => {
     it('stores fetched messages', async () => {
       engine = build();
       client.fetch.mockImplementation(messagesFrom({ uid: 5 }, { uid: 6 }));
@@ -285,7 +285,7 @@ describe('SyncEngine', () => {
     });
   });
 
-  describe('baseline flag sweep', () => {
+  describe('baseline flag sweep', async () => {
     it('picks up a flag change made by another client on a server without CONDSTORE', async () => {
       engine = build();
       client.fetch.mockImplementation(messagesFrom({ uid: 1, flags: new Set(['\\Seen']) }));
@@ -332,7 +332,7 @@ describe('SyncEngine', () => {
   // CONDSTORE tier
   // -------------------------------------------------------------------------
 
-  describe('condstore tier', () => {
+  describe('condstore tier', async () => {
     it('passes changedSince once a modseq watermark exists', async () => {
       engine = build(['CONDSTORE']);
       client.mailbox.highestModseq = 500n;
@@ -375,7 +375,7 @@ describe('SyncEngine', () => {
   // Resilience
   // -------------------------------------------------------------------------
 
-  describe('deletion reconciliation safety', () => {
+  describe('deletion reconciliation safety', async () => {
     async function seedThree(): Promise<void> {
       client.fetch.mockImplementation(messagesFrom({ uid: 1 }, { uid: 2 }, { uid: 3 }));
       client.search.mockResolvedValue([1, 2, 3]);
@@ -430,7 +430,7 @@ describe('SyncEngine', () => {
   // Fetched field mapping
   // -------------------------------------------------------------------------
 
-  describe('fetched field mapping', () => {
+  describe('fetched field mapping', async () => {
     it('parses the References header chain into the mirror', async () => {
       engine = build();
       client.fetch.mockImplementation(() =>
@@ -481,7 +481,7 @@ describe('SyncEngine', () => {
   // Initial sync window
   // -------------------------------------------------------------------------
 
-  describe('initial sync window', () => {
+  describe('initial sync window', async () => {
     it('limits the first sync to the configured window', async () => {
       client = createMockClient();
       // The window probe resolves UIDs within the date window; the deletion
@@ -580,7 +580,7 @@ describe('SyncEngine', () => {
     });
   });
 
-  describe('resilience', () => {
+  describe('resilience', async () => {
     it('leaves existing rows in place when a sync fails', async () => {
       engine = build();
       client.fetch.mockImplementation(messagesFrom({ uid: 1 }));
@@ -731,7 +731,7 @@ describe('review fixes: sync engine', () => {
     client.mailbox.exists = many.length;
     engine = new SyncEngine(createConnections(client), store);
     // Seed enough rows that the sweep has to compute a lower bound over them.
-    store.putMessages(
+    await store.putMessages(
       many.slice(0, 130_000).map((uid) => ({
         account: 'work',
         mailbox: 'INBOX',

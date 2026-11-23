@@ -106,8 +106,8 @@ describe('MailReadService (pass-through)', () => {
 // Cached read path
 // ---------------------------------------------------------------------------
 
-function seedMessages(store: CacheStore) {
-  store.putMessages([
+async function seedMessages(store: CacheStore) {
+  await store.putMessages([
     {
       account: 'work',
       mailbox: 'INBOX',
@@ -176,9 +176,9 @@ function createEngineStub() {
   };
 }
 
-function createCachedSetup(options: { lastSyncedAt?: number; syncWaitMs?: number } = {}) {
+async function createCachedSetup(options: { lastSyncedAt?: number; syncWaitMs?: number } = {}) {
   const store = new CacheStore(':memory:');
-  seedMessages(store);
+  await seedMessages(store);
   seedState(store, options.lastSyncedAt ?? Date.now());
   const stub = createImapStub();
   const imap = {
@@ -197,7 +197,7 @@ function createCachedSetup(options: { lastSyncedAt?: number; syncWaitMs?: number
 
 describe('MailReadService (cached reads)', () => {
   it('serves a fresh mirror without touching the network', async () => {
-    const { imap, engine, service } = createCachedSetup();
+    const { imap, engine, service } = await createCachedSetup();
 
     const result = await service.listEmails('work', { mailbox: 'INBOX' });
 
@@ -210,7 +210,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('maps cached rows to the live EmailMeta shape', async () => {
-    const { service } = createCachedSetup();
+    const { service } = await createCachedSetup();
 
     const { items } = await service.listEmails('work', { mailbox: 'INBOX' });
     const invoice = items.find((m) => m.id === '1');
@@ -228,7 +228,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('applies filters to the cached listing', async () => {
-    const { service } = createCachedSetup();
+    const { service } = await createCachedSetup();
 
     const result = await service.listEmails('work', { mailbox: 'INBOX', seen: false });
 
@@ -237,7 +237,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('revalidates with one STATUS once the debounce has passed', async () => {
-    const { imap, engine, service, store } = createCachedSetup({
+    const { imap, engine, service, store } = await createCachedSetup({
       lastSyncedAt: Date.now() - 60_000,
     });
 
@@ -254,7 +254,9 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('syncs before serving when STATUS reports a change', async () => {
-    const { imap, engine, service } = createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
+    const { imap, engine, service } = await createCachedSetup({
+      lastSyncedAt: Date.now() - 60_000,
+    });
     imap.getMailboxStatus.mockResolvedValue({ uidValidity: '100', uidNext: 7, messages: 3 });
 
     const result = await service.listEmails('work', { mailbox: 'INBOX' });
@@ -264,7 +266,9 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('treats an uncomparable STATUS as changed', async () => {
-    const { imap, engine, service } = createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
+    const { imap, engine, service } = await createCachedSetup({
+      lastSyncedAt: Date.now() - 60_000,
+    });
     // A server that reports none of the comparable fields gives no evidence
     // the mirror is current — that must trigger a sync, never a cache hit.
     imap.getMailboxStatus.mockResolvedValue({});
@@ -275,7 +279,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('serves stale with a marker when the sync exceeds the bounded wait', async () => {
-    const { imap, engine, service } = createCachedSetup({
+    const { imap, engine, service } = await createCachedSetup({
       lastSyncedAt: Date.now() - 60_000,
       syncWaitMs: 5,
     });
@@ -289,7 +293,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('serves the mirror flagged offline when IMAP is unreachable', async () => {
-    const { imap, service } = createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
+    const { imap, service } = await createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
     imap.getMailboxStatus.mockRejectedValue(new Error('ECONNREFUSED'));
 
     const result = await service.listEmails('work', { mailbox: 'INBOX' });
@@ -300,7 +304,9 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('flags the result offline when the awaited sync fails', async () => {
-    const { imap, engine, service } = createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
+    const { imap, engine, service } = await createCachedSetup({
+      lastSyncedAt: Date.now() - 60_000,
+    });
     imap.getMailboxStatus.mockResolvedValue({ uidValidity: '100', uidNext: 7, messages: 3 });
     engine.syncMailbox.mockResolvedValue({
       ok: false,
@@ -318,7 +324,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('falls back to live for a mailbox the mirror has never synced', async () => {
-    const { imap, engine, service } = createCachedSetup();
+    const { imap, engine, service } = await createCachedSetup();
 
     const result = await service.listEmails('work', { mailbox: 'Archive' });
 
@@ -329,7 +335,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('bypasses the debounce when the mailbox is dirty', async () => {
-    const { engine, service } = createCachedSetup({ lastSyncedAt: Date.now() });
+    const { engine, service } = await createCachedSetup({ lastSyncedAt: Date.now() });
     engine.isDirty.mockReturnValue(true);
 
     await service.listEmails('work', { mailbox: 'INBOX' });
@@ -338,7 +344,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('serves email flags from the mirror', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
 
     const flags = await service.getEmailFlags('work', '1', 'INBOX');
 
@@ -354,7 +360,7 @@ describe('MailReadService (cached reads)', () => {
   });
 
   it('falls back to live flags when the message is not mirrored', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
 
     await service.getEmailFlags('work', '999', 'INBOX');
 
@@ -386,7 +392,7 @@ describe('MailReadService (cached bodies)', () => {
   }
 
   it('serves a fully cached message without touching the network', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     store.putBody('work', 'INBOX', 1, '100', {
       text: 'Anbei die Rechnung.',
       subtype: 'plain',
@@ -414,7 +420,7 @@ describe('MailReadService (cached bodies)', () => {
   });
 
   it('maps a cached html body to bodyHtml', async () => {
-    const { store, service } = createCachedSetup();
+    const { store, service } = await createCachedSetup();
     store.putBody('work', 'INBOX', 2, '100', {
       text: '<p>Hi</p>',
       subtype: 'html',
@@ -428,7 +434,7 @@ describe('MailReadService (cached bodies)', () => {
   });
 
   it('fetches live on a body miss and persists the result for the next read', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     imap.getEmail.mockResolvedValue(fullLiveEmail());
 
     const first = await service.getEmail('work', '1', 'INBOX');
@@ -446,7 +452,7 @@ describe('MailReadService (cached bodies)', () => {
   });
 
   it('does not persist an oversized body and does not retry it in backfill', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     imap.getEmail.mockResolvedValue(fullLiveEmail({ bodyText: 'x'.repeat(300 * 1024) }));
 
     await service.getEmail('work', '1', 'INBOX');
@@ -457,7 +463,7 @@ describe('MailReadService (cached bodies)', () => {
   });
 
   it('coalesces concurrent fetches of the same message', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
     imap.getEmail.mockImplementation(
       () => new Promise((resolve) => setTimeout(() => resolve(fullLiveEmail()), 5)),
     );
@@ -475,7 +481,7 @@ describe('MailReadService (cached bodies)', () => {
 
 describe('MailReadService (cached search)', () => {
   it('serves a full-text query from the mirror', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     store.putBody('work', 'INBOX', 1, '100', { text: 'Anbei die Rechnung fuer August.' });
 
     const result = await service.searchEmails('work', 'Rechnung', { mailbox: 'INBOX' });
@@ -487,7 +493,7 @@ describe('MailReadService (cached search)', () => {
   });
 
   it('serves a filter-only search (no query) from the mirror', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
 
     const result = await service.searchEmails('work', '', {
       mailbox: 'INBOX',
@@ -499,7 +505,7 @@ describe('MailReadService (cached search)', () => {
   });
 
   it('falls through to live search when the mirror finds nothing', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
 
     // Recall gap: bodies not yet backfilled, so a body term cannot match.
     await service.searchEmails('work', 'Nebelkraehe', { mailbox: 'INBOX' });
@@ -510,7 +516,7 @@ describe('MailReadService (cached search)', () => {
   });
 
   it('always goes live for filters the mirror cannot evaluate', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
 
     await service.searchEmails('work', 'Invoice', { mailbox: 'INBOX', to: 'x@example.com' });
     await service.searchEmails('work', 'Invoice', { mailbox: 'INBOX', largerThan: 10 });
@@ -537,7 +543,7 @@ describe('MailReadService (cached search)', () => {
   });
 
   it('pages cached search results', async () => {
-    const { store, service } = createCachedSetup();
+    const { store, service } = await createCachedSetup();
     store.putBody('work', 'INBOX', 1, '100', { text: 'Rechnung eins' });
     store.putBody('work', 'INBOX', 2, '100', { text: 'Rechnung zwei' });
 
@@ -554,9 +560,9 @@ describe('MailReadService (cached search)', () => {
 });
 
 describe('MailReadService (cached thread)', () => {
-  function seedThread(store: CacheStore) {
+  async function seedThread(store: CacheStore) {
     const base = Date.parse('2026-09-01T10:00:00Z');
-    store.putMessages([
+    await store.putMessages([
       {
         account: 'work',
         mailbox: 'INBOX',
@@ -592,8 +598,8 @@ describe('MailReadService (cached thread)', () => {
   }
 
   it('assembles a thread from the mirror without any IMAP search', async () => {
-    const { store, imap, service } = createCachedSetup();
-    seedThread(store);
+    const { store, imap, service } = await createCachedSetup();
+    await seedThread(store);
 
     const thread = await service.getThread('work', '<t1@x>', 'INBOX');
 
@@ -605,9 +611,9 @@ describe('MailReadService (cached thread)', () => {
   });
 
   it('live-fetches thread members whose body is not mirrored yet', async () => {
-    const { store, imap, service } = createCachedSetup();
-    seedThread(store);
-    store.putMessages([
+    const { store, imap, service } = await createCachedSetup();
+    await seedThread(store);
+    await store.putMessages([
       {
         account: 'work',
         mailbox: 'INBOX',
@@ -647,7 +653,7 @@ describe('MailReadService (cached thread)', () => {
   });
 
   it('falls back to the live thread walk when the root is unknown to the mirror', async () => {
-    const { service, imap } = createCachedSetup();
+    const { service, imap } = await createCachedSetup();
 
     await service.getThread('work', '<absent@x>', 'INBOX');
 
@@ -657,7 +663,7 @@ describe('MailReadService (cached thread)', () => {
 
 describe('MailReadService (locate)', () => {
   it('resolves the Message-ID from the mirror and still verifies folders live', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
 
     const result = await service.findEmailFolder('work', '1', 'INBOX');
 
@@ -669,8 +675,8 @@ describe('MailReadService (locate)', () => {
 });
 
 describe('MailReadService (cached attachments)', () => {
-  function createAttachmentSetup() {
-    const base = createCachedSetup();
+  async function createAttachmentSetup() {
+    const base = await createCachedSetup();
     const blobs = new Map<string, Buffer>();
     const blobStore = {
       put: vi.fn(async (content: Buffer) => {
@@ -702,7 +708,7 @@ describe('MailReadService (cached attachments)', () => {
   };
 
   it('downloads once and serves the repeat read from the blob store', async () => {
-    const { imap, blobStore, service } = createAttachmentSetup();
+    const { imap, blobStore, service } = await createAttachmentSetup();
     imap.downloadAttachment.mockResolvedValue(liveAttachment);
 
     const first = await service.downloadAttachment('work', '1', 'INBOX', 'report.pdf');
@@ -715,7 +721,7 @@ describe('MailReadService (cached attachments)', () => {
   });
 
   it('deduplicates identical content across messages', async () => {
-    const { imap, blobs, service } = createAttachmentSetup();
+    const { imap, blobs, service } = await createAttachmentSetup();
     imap.downloadAttachment.mockResolvedValue(liveAttachment);
 
     await service.downloadAttachment('work', '1', 'INBOX', 'report.pdf');
@@ -725,7 +731,7 @@ describe('MailReadService (cached attachments)', () => {
   });
 
   it('re-downloads when the indexed blob has vanished', async () => {
-    const { imap, blobs, service } = createAttachmentSetup();
+    const { imap, blobs, service } = await createAttachmentSetup();
     imap.downloadAttachment.mockResolvedValue(liveAttachment);
     await service.downloadAttachment('work', '1', 'INBOX', 'report.pdf');
 
@@ -740,7 +746,7 @@ describe('MailReadService (cached attachments)', () => {
   });
 
   it('does not cache an attachment from an unmirrored mailbox', async () => {
-    const { imap, blobStore, service } = createAttachmentSetup();
+    const { imap, blobStore, service } = await createAttachmentSetup();
     imap.downloadAttachment.mockResolvedValue(liveAttachment);
 
     await service.downloadAttachment('work', '1', 'Archive', 'report.pdf');
@@ -749,7 +755,7 @@ describe('MailReadService (cached attachments)', () => {
   });
 
   it('passes the caller size cap through to the live download', async () => {
-    const { imap, service } = createAttachmentSetup();
+    const { imap, service } = await createAttachmentSetup();
     imap.downloadAttachment.mockResolvedValue(liveAttachment);
 
     await service.downloadAttachment('work', '1', 'INBOX', 'report.pdf', 2048);
@@ -764,7 +770,7 @@ describe('MailReadService (cached attachments)', () => {
   });
 
   it('serves a cached attachment even when IMAP is unreachable', async () => {
-    const { imap, service } = createAttachmentSetup();
+    const { imap, service } = await createAttachmentSetup();
     imap.downloadAttachment.mockResolvedValue(liveAttachment);
     await service.downloadAttachment('work', '1', 'INBOX', 'report.pdf');
 
@@ -779,7 +785,7 @@ describe('MailReadService (cached attachments)', () => {
 
 describe('MailReadService (review fixes)', () => {
   it('falls back to live when the mirror does not cover the whole mailbox', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     // The server says 9000 messages; the mirror holds 2 (a window-bounded
     // first sync). Serving that as a complete listing reports total: 2 and
     // "no more pages" for a mailbox full of older mail.
@@ -800,7 +806,7 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('still serves the mirror when it covers the mailbox', async () => {
-    const { imap, service } = createCachedSetup();
+    const { imap, service } = await createCachedSetup();
 
     const result = await service.listEmails('work', { mailbox: 'INBOX' });
 
@@ -809,7 +815,7 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('sends a partial-coverage search to the live path too', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     store.putBody('work', 'INBOX', 1, '100', { text: 'Rechnung August' });
     store.putMailboxState({
       account: 'work',
@@ -827,11 +833,11 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('writes a live-fetched body against the epoch the read was served from', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     imap.getEmail.mockImplementation(async () => {
       // A concurrent sync rotates the epoch while the fetch is in flight.
       store.resetEpoch('work', 'INBOX', '200');
-      store.putMessages([
+      await store.putMessages([
         {
           account: 'work',
           mailbox: 'INBOX',
@@ -871,7 +877,9 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('marks the mailbox dirty before awaiting a sync, so a coalesced run cannot pass as complete', async () => {
-    const { imap, engine, service } = createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
+    const { imap, engine, service } = await createCachedSetup({
+      lastSyncedAt: Date.now() - 60_000,
+    });
     imap.getMailboxStatus.mockResolvedValue({ uidValidity: '100', uidNext: 7, messages: 3 });
 
     await service.listEmails('work', { mailbox: 'INBOX' });
@@ -880,7 +888,7 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('degrades to the live path when the mirror itself errors', async () => {
-    const { store, imap, service } = createCachedSetup();
+    const { store, imap, service } = await createCachedSetup();
     // A locked or corrupt database must not surface as a tool error.
     store.close();
 
@@ -891,7 +899,7 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('serves a preview for cached listings even before any body is stored', async () => {
-    const { service } = createCachedSetup();
+    const { service } = await createCachedSetup();
 
     const { items } = await service.listEmails('work', { mailbox: 'INBOX' });
 
@@ -901,8 +909,8 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('includes cc recipients and folds address case in thread participants', async () => {
-    const { store, imap, service } = createCachedSetup();
-    store.putMessages([
+    const { store, imap, service } = await createCachedSetup();
+    await store.putMessages([
       {
         account: 'work',
         mailbox: 'INBOX',
@@ -953,7 +961,7 @@ describe('MailReadService (review fixes)', () => {
   });
 
   it('issues one STATUS probe for a batch of concurrent reads', async () => {
-    const { imap, service } = createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
+    const { imap, service } = await createCachedSetup({ lastSyncedAt: Date.now() - 60_000 });
 
     await Promise.all([
       service.getEmail('work', '1', 'INBOX'),
